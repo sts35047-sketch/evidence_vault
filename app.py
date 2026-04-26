@@ -24,8 +24,9 @@ from reportlab.platypus import (SimpleDocTemplate, Paragraph, Spacer,
 try:
     import google.generativeai as genai
     GEMINI_AVAILABLE = True
-    GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "AIzaSyBl1mMhNvji9d5zqa9Rq_CrC3px2R_L7PA")
-    genai.configure(api_key=GEMINI_API_KEY)
+    GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "").strip()
+    if GEMINI_API_KEY:
+        genai.configure(api_key=GEMINI_API_KEY)
 except ImportError:
     GEMINI_AVAILABLE = False
     print("⚠ Google Generative AI not installed. Run: pip install google-generativeai")
@@ -86,13 +87,9 @@ API_KEY     = os.environ.get("API_KEY", "evault-demo-key-2026")
 DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL", "")
 LIBRETRANSLATE_URLS = [u.strip() for u in os.environ.get("LIBRETRANSLATE_URLS", "https://libretranslate.com/translate").split(",") if u.strip()]
 LIBRETRANSLATE_API_KEYS = [k.strip() for k in os.environ.get("LIBRETRANSLATE_API_KEYS", "").split(",") if k.strip()]
-GEMINI_API_KEYS = []
-_gemini_keys_csv = os.environ.get("GEMINI_API_KEYS", "")
-if _gemini_keys_csv.strip():
-    GEMINI_API_KEYS.extend([k.strip() for k in _gemini_keys_csv.split(",") if k.strip()])
-_single_key = os.environ.get("GEMINI_API_KEY", "").strip()
-if _single_key and _single_key not in GEMINI_API_KEYS:
-    GEMINI_API_KEYS.append(_single_key)
+# Strict mode: one key, one model only.
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "").strip()
+GEMINI_MODEL = "gemini-1.5-flash"
 ENABLE_GEMINI_INSIGHTS = os.environ.get("ENABLE_GEMINI_INSIGHTS", "0").lower() in {"1", "true", "yes", "on"}
 OCR_TRY_GEMINI_FIRST = os.environ.get("OCR_TRY_GEMINI_FIRST", "0").lower() in {"1", "true", "yes", "on"}
 
@@ -137,8 +134,8 @@ def get_gemini_model_candidates():
     if _gemini_models_cache is not None:
         return _gemini_models_cache
 
-    # User-requested strict mode: force only gemini-1.5-flash.
-    _gemini_models_cache = ["gemini-1.5-flash"]
+    # Strict mode: force only one model.
+    _gemini_models_cache = [GEMINI_MODEL]
     return _gemini_models_cache
 
 def get_valid_gemini_keys():
@@ -148,15 +145,16 @@ def get_valid_gemini_keys():
     if not GEMINI_AVAILABLE or not genai:
         _valid_gemini_keys_cache = []
         return _valid_gemini_keys_cache
-    valid = []
-    for k in GEMINI_API_KEYS:
-        try:
-            genai.configure(api_key=k)
-            list(genai.list_models())
-            valid.append(k)
-        except Exception as e:
-            print(f"[Gemini] Invalid API key skipped: {type(e).__name__}")
-    _valid_gemini_keys_cache = valid
+    if not GEMINI_API_KEY:
+        _valid_gemini_keys_cache = []
+        return _valid_gemini_keys_cache
+    try:
+        genai.configure(api_key=GEMINI_API_KEY)
+        list(genai.list_models())
+        _valid_gemini_keys_cache = [GEMINI_API_KEY]
+    except Exception as e:
+        print(f"[Gemini] Invalid API key: {type(e).__name__}")
+        _valid_gemini_keys_cache = []
     return _valid_gemini_keys_cache
 
 def text_quality_score(text: str) -> int:
@@ -172,20 +170,20 @@ def gemini_generate_text(prompt: str):
     valid_keys = get_valid_gemini_keys()
     if not GEMINI_AVAILABLE or not valid_keys:
         return None
-    for api_key in valid_keys:
+    api_key = valid_keys[0]
+    try:
+        genai.configure(api_key=api_key)
+        model_name = get_gemini_model_candidates()[0]
         try:
-            genai.configure(api_key=api_key)
-            for model_name in get_gemini_model_candidates():
-                try:
-                    model = genai.GenerativeModel(model_name)
-                    response = model.generate_content(prompt)
-                    txt = (getattr(response, "text", "") or "").strip()
-                    if txt:
-                        return txt
-                except Exception:
-                    continue
+            model = genai.GenerativeModel(model_name)
+            response = model.generate_content(prompt)
+            txt = (getattr(response, "text", "") or "").strip()
+            if txt:
+                return txt
         except Exception:
-            continue
+            return None
+    except Exception:
+        return None
     return None
 
 def translate_text(text: str):
@@ -394,6 +392,20 @@ def calculate_sentiment_extensions(text: str, scores: dict):
     return scores
 
 TOXIC_KW = ["hate","stupid","idiot","kill","die","fuck","shit","damn","asshole","bitch","ugly","worthless","loser","trash","moron","scum","disgusting","filth","retard","freak","murder","destroy","abuse","harass","threaten"]
+SEVERE_PHRASES = [
+    "kill yourself", "go die", "i will kill", "i will hurt you", "i will destroy you",
+    "leak your photos", "ruin your life", "watch your back", "you should die"
+]
+LEET_MAP = str.maketrans({
+    "0": "o", "1": "i", "3": "e", "4": "a", "5": "s", "7": "t", "@": "a", "$": "s"
+})
+
+def normalize_for_toxicity(text: str) -> str:
+    t = (text or "").lower().translate(LEET_MAP)
+    # collapse repeated symbols/spaces and keep letters/numbers/basic separators
+    t = re.sub(r"[^a-z0-9\s!?.,'-]", " ", t)
+    t = re.sub(r"\s+", " ", t).strip()
+    return t
 
 BASIC_USER_QA = {
     "what is cyberbullying": "Cyberbullying is repeated harmful behavior through digital platforms, including threats, humiliation, blackmail, and abusive messages.",
@@ -418,6 +430,8 @@ def detect_toxicity(text: str):
     model = get_model()
     scores = {}
     primary = 0.0
+    norm_text = normalize_for_toxicity(text)
+
     if model:
         try:
             raw = model.predict(text)
@@ -425,18 +439,41 @@ def detect_toxicity(text: str):
             primary = scores.get("toxicity", 0.0)
         except Exception: pass
 
+    # Rule-based score used as fallback and booster for obvious abuse.
+    hits = [kw for kw in TOXIC_KW if kw in norm_text]
+    severe_hits = [p for p in SEVERE_PHRASES if p in norm_text]
+    keyword_score = min(len(hits) * 0.12 + len(severe_hits) * 0.25, 1.0)
+    if text.isupper():
+        keyword_score = min(keyword_score + 0.12, 1.0)
+    if text.count("!") >= 3:
+        keyword_score = min(keyword_score + 0.08, 1.0)
+
     if not scores:
-        hits = [kw for kw in TOXIC_KW if kw in text.lower()]
-        primary = min(len(hits) * 0.15, 1.0)
-        scores = { "toxicity": round(primary, 4), "severe_toxicity": round(primary * 0.4, 4), "obscene": round(primary * 0.3, 4), "threat": round(primary * 0.2, 4), "insult": round(primary * 0.5, 4), "identity_hate": round(primary * 0.1, 4) }
+        primary = keyword_score
+        scores = {
+            "toxicity": round(primary, 4),
+            "severe_toxicity": round(min(primary * 0.45 + len(severe_hits) * 0.15, 1.0), 4),
+            "obscene": round(primary * 0.35, 4),
+            "threat": round(min(primary * 0.30 + len(severe_hits) * 0.2, 1.0), 4),
+            "insult": round(primary * 0.5, 4),
+            "identity_hate": round(primary * 0.1, 4),
+        }
+    else:
+        # Hybrid mode: do not under-score obvious abuse missed by model.
+        primary = max(primary, keyword_score)
+        scores["toxicity"] = round(max(scores.get("toxicity", 0.0), keyword_score), 4)
+        if severe_hits:
+            scores["threat"] = round(min(max(scores.get("threat", 0.0), 0.55) + len(severe_hits) * 0.1, 1.0), 4)
+            scores["severe_toxicity"] = round(min(max(scores.get("severe_toxicity", 0.0), 0.5) + len(severe_hits) * 0.1, 1.0), 4)
 
     scores = calculate_sentiment_extensions(text, scores)
     label_map = { "severe_toxicity": "Severe Toxicity", "obscene": "Obscene Content", "threat": "Threat", "insult": "Insult", "identity_hate": "Identity Hate", "toxicity": "General Toxicity", "anger_index": "High Aggression", "sarcasm_probability": "Passive Aggressive" }
     
     dominant = max(scores, key=lambda k: scores[k])
     category = label_map.get(dominant, "Toxicity") if scores[dominant] > 0.1 else "Neutral"
-    severity = "High" if primary >= 0.75 else ("Medium" if primary >= 0.40 else "Low")
-    return category, severity, primary, scores, [kw for kw in TOXIC_KW if kw in text.lower()]
+    # Slightly more sensitive thresholds for practical moderation.
+    severity = "High" if primary >= 0.7 else ("Medium" if primary >= 0.3 else "Low")
+    return category, severity, primary, scores, hits + severe_hits
 
 def answer_basic_user_question(question: str) -> str:
     q = (question or "").strip().lower()
@@ -1171,7 +1208,7 @@ def gemini_assistant():
     if not GEMINI_AVAILABLE:
         return jsonify({"error": "Gemini package is not available on this system."}), 500
     if not get_valid_gemini_keys():
-        return jsonify({"error": "Gemini API key is invalid or missing. Set GEMINI_API_KEYS and restart app."}), 500
+        return jsonify({"error": "Gemini API key is invalid or missing. Set GEMINI_API_KEY and restart app."}), 500
 
     prompt = f"""
     You are Sakhi AI, a supportive cyber safety and legal-awareness assistant.
@@ -1356,7 +1393,7 @@ def generate_cd(eid):
         return jsonify({"error": "Only Administrators can generate AI legal letters."}), 403
     valid_keys = get_valid_gemini_keys()
     if not GEMINI_AVAILABLE or not valid_keys:
-        return jsonify({"error": "Gemini is not configured. Add a valid key in GEMINI_API_KEYS env and restart app."}), 500
+        return jsonify({"error": "Gemini is not configured. Add a valid GEMINI_API_KEY and restart app."}), 500
     with get_db() as c: row_raw = c.execute("SELECT * FROM evidence WHERE evidence_id=?", (eid,)).fetchone()
     if not row_raw: return jsonify({"error": "Evidence not found."}), 404
         
@@ -1438,7 +1475,8 @@ if __name__ == "__main__":
     print("-"*70)
     print(f"  Detoxify ML:       {'LOADED' if DETOXIFY_AVAILABLE else 'Not installed'}")
     print(f"  OCR (Tesseract):   {'AVAILABLE' if OCR_AVAILABLE else 'NOT INSTALLED'}")
-    print(f"  Gemini API Keys:   {len(GEMINI_API_KEYS)} configured")
+    print(f"  Gemini API Key:    {'configured' if GEMINI_API_KEY else 'missing'}")
+    print(f"  Gemini Model:      {GEMINI_MODEL}")
     print(f"  Encryption:        {'AVAILABLE' if ENCRYPTION_AVAILABLE else 'Not available'}")
     print("-"*70)
 
