@@ -109,6 +109,7 @@
     <div class="hero-actions">
       <button class="btn-primary" onclick="document.getElementById('analyze-section').scrollIntoView({behavior:'smooth'})">ANALYZE EVIDENCE ↗</button>
       <a href="/vault"><button class="btn-ghost">VIEW VAULT →</button></a>
+      <a href="/info"><button class="btn-ghost">BASIC INFO HUB 📘</button></a>
     </div>
   </div>
 </section>
@@ -523,22 +524,36 @@ async function askUserAI() {
         return;
     }
 
-    output.textContent = 'Thinking...';
+    output.textContent = 'Sakhi is thinking...';
     if (stepsBox) stepsBox.innerHTML = '';
     try {
+        const gemRes = await fetch('/api/v1/gemini_assistant', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ question })
+        });
+        const gemData = await gemRes.json();
+        if (gemRes.ok && !gemData.error) {
+            output.textContent = gemData.answer || 'No answer available.';
+            if (historyBox) historyBox.innerHTML = '<strong>Mode:</strong> Gemini (gemini-1.5-flash)';
+            return;
+        }
+
         const res = await fetch('/api/v1/user_assistant', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({ question })
         });
         const data = await res.json();
-        output.textContent = data.answer || 'No answer available.';
+        output.textContent = data.answer || gemData.error || 'No answer available.';
         if (stepsBox && Array.isArray(data.action_steps)) {
             stepsBox.innerHTML = data.action_steps.map((s, i) => `<div>${i+1}. ${s}</div>`).join('');
         }
-        if (historyBox && Array.isArray(data.history) && data.history.length) {
-            const short = data.history.slice(-3).map((h) => `• ${h.q}`).join('<br>');
-            historyBox.innerHTML = `<strong>Recent:</strong><br>${short}`;
+        if (historyBox) {
+            const short = Array.isArray(data.history) && data.history.length
+                ? data.history.slice(-3).map((h) => `• ${h.q}`).join('<br>')
+                : 'No recent questions.';
+            historyBox.innerHTML = `<strong>Mode:</strong> Built-in Sakhi fallback<br><strong>Recent:</strong><br>${short}`;
         }
     } catch (e) {
         output.textContent = 'Assistant is unavailable right now. Please try again.';

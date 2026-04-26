@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>Basic Info Hub — EvidenceVault</title>
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet"/>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+<div id="cursor-outer"></div><div id="cursor-inner"></div>
+<div class="blob-layer"><div class="blob blob-1"></div><div class="blob blob-2"></div><div class="blob blob-3"></div></div>
+
+<nav>
+  <div class="nav-logo">EVIDENCE<span>VAULT</span></div>
+  <div class="nav-links">
+    <a href="/">Dashboard</a>
+    <a href="/vault">Vault</a>
+    <a href="/verify">Verify</a>
+    <a href="/legal">Legal Guide</a>
+    <a href="/info" class="active">Info Hub</a>
+  </div>
+  <div class="nav-user">
+    <span class="user-chip">{{ username }} · {{ role }}</span>
+    <a href="/logout" class="btn-logout">LOGOUT</a>
+  </div>
+</nav>
+
+<section class="section" style="padding-top:120px;">
+  <div class="section-label reveal">GUIDANCE CENTER</div>
+  <h2 class="section-title reveal">Basic <em>Info Hub.</em></h2>
+  <div class="bento-grid">
+    <div class="bento-cell wide reveal">
+      <div class="bento-label">WHEN ABUSE HAPPENS</div>
+      <ul style="margin: 8px 0 0 18px; color:#e2e8f0; line-height:1.7;">
+        <li>Do not delete chats or screenshots.</li>
+        <li>Save profile link, username, date, and time.</li>
+        <li>Avoid replying with threats or abuse.</li>
+        <li>Block and report after preserving evidence.</li>
+      </ul>
+    </div>
+    <div class="bento-cell reveal">
+      <div class="bento-label">SAFETY QUICK CHECK</div>
+      <ul style="margin: 8px 0 0 18px; color:#e2e8f0; line-height:1.7;">
+        <li>Change password and enable 2FA.</li>
+        <li>Review unknown sessions/devices.</li>
+        <li>Tell your helper/trusted contact.</li>
+        <li>For immediate danger, contact police now.</li>
+      </ul>
+    </div>
+    <div class="bento-cell reveal" style="transition-delay:.1s">
+      <div class="bento-label">LEGAL PREP BASICS</div>
+      <ul style="margin: 8px 0 0 18px; color:#e2e8f0; line-height:1.7;">
+        <li>Keep original files untouched.</li>
+        <li>Document event timeline in order.</li>
+        <li>Use hash verification reports from this app.</li>
+        <li>Share complete package with legal support.</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="footer-logo">EVIDENCE<span>VAULT</span></div>
+  <div class="footer-copy">© 2026 EVIDENCEVAULT. ALL RIGHTS RESERVED.</div>
+</footer>
+<script src="{{ url_for('static', filename='script.js') }}"></script>
+</body>
+</html>

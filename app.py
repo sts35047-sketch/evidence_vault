@@ -85,7 +85,13 @@ API_KEY     = os.environ.get("API_KEY", "evault-demo-key-2026")
 DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL", "")
 LIBRETRANSLATE_URLS = [u.strip() for u in os.environ.get("LIBRETRANSLATE_URLS", "https://libretranslate.com/translate").split(",") if u.strip()]
 LIBRETRANSLATE_API_KEYS = [k.strip() for k in os.environ.get("LIBRETRANSLATE_API_KEYS", "").split(",") if k.strip()]
-GEMINI_API_KEYS = [k.strip() for k in os.environ.get("GEMINI_API_KEYS", "").split(",") if k.strip()]
+GEMINI_API_KEYS = []
+_gemini_keys_csv = os.environ.get("GEMINI_API_KEYS", "")
+if _gemini_keys_csv.strip():
+    GEMINI_API_KEYS.extend([k.strip() for k in _gemini_keys_csv.split(",") if k.strip()])
+_single_key = os.environ.get("GEMINI_API_KEY", "").strip()
+if _single_key and _single_key not in GEMINI_API_KEYS:
+    GEMINI_API_KEYS.append(_single_key)
 ENABLE_GEMINI_INSIGHTS = os.environ.get("ENABLE_GEMINI_INSIGHTS", "0").lower() in {"1", "true", "yes", "on"}
 OCR_TRY_GEMINI_FIRST = os.environ.get("OCR_TRY_GEMINI_FIRST", "0").lower() in {"1", "true", "yes", "on"}
 
@@ -130,39 +136,8 @@ def get_gemini_model_candidates():
     if _gemini_models_cache is not None:
         return _gemini_models_cache
 
-    fallback = ["gemini-1.5-flash-latest", "gemini-1.5-flash", "gemini-1.5-pro", "gemini-pro"]
-    if not GEMINI_AVAILABLE or not genai:
-        _gemini_models_cache = fallback
-        return _gemini_models_cache
-
-    discovered = []
-    try:
-        for m in genai.list_models():
-            methods = getattr(m, "supported_generation_methods", []) or []
-            if "generateContent" in methods:
-                name = getattr(m, "name", "")
-                if name.startswith("models/"):
-                    name = name.split("/", 1)[1]
-                if name:
-                    discovered.append(name)
-    except Exception as e:
-        print(f"[Gemini] list_models failed: {type(e).__name__}")
-
-    # Prioritize known good families first, then append the rest.
-    preferred_order = ["gemini-1.5-flash", "gemini-1.5-pro", "gemini-pro"]
-    ordered = []
-    for p in preferred_order:
-        for d in discovered:
-            if p in d and d not in ordered:
-                ordered.append(d)
-    for d in discovered:
-        if d not in ordered:
-            ordered.append(d)
-    for f in fallback:
-        if f not in ordered:
-            ordered.append(f)
-
-    _gemini_models_cache = ordered
+    # User-requested strict mode: force only gemini-1.5-flash.
+    _gemini_models_cache = ["gemini-1.5-flash"]
     return _gemini_models_cache
 
 def get_valid_gemini_keys():
@@ -191,6 +166,26 @@ def text_quality_score(text: str) -> int:
     words = len([w for w in re.split(r"\s+", t) if w])
     lines = len([ln for ln in t.splitlines() if ln.strip()])
     return alnum + words * 5 + lines * 2
+
+def gemini_generate_text(prompt: str):
+    valid_keys = get_valid_gemini_keys()
+    if not GEMINI_AVAILABLE or not valid_keys:
+        return None
+    for api_key in valid_keys:
+        try:
+            genai.configure(api_key=api_key)
+            for model_name in get_gemini_model_candidates():
+                try:
+                    model = genai.GenerativeModel(model_name)
+                    response = model.generate_content(prompt)
+                    txt = (getattr(response, "text", "") or "").strip()
+                    if txt:
+                        return txt
+                except Exception:
+                    continue
+        except Exception:
+            continue
+    return None
 
 def translate_text(text: str):
     if not text.strip():
@@ -938,6 +933,11 @@ def verify():
 @login_required
 def legal(): return render_template("legal.html", username=session["username"], role=session["role"])
 
+@app.route("/info")
+@login_required
+def info():
+    return render_template("info.html", username=session["username"], role=session["role"])
+
 @app.route("/export/csv")
 @login_required
 def export_csv():
@@ -994,6 +994,31 @@ def user_assistant():
     session["sakhi_history"] = history[-5:]
     payload["history"] = session.get("sakhi_history", [])
     return jsonify(payload)
+
+@app.route("/api/v1/gemini_assistant", methods=["POST"])
+@login_required
+def gemini_assistant():
+    data = request.get_json(force=True) or {}
+    question = (data.get("question") or "").strip()
+    if not question:
+        return jsonify({"error": "Please enter a question."}), 400
+    if not GEMINI_AVAILABLE:
+        return jsonify({"error": "Gemini package is not available on this system."}), 500
+    if not get_valid_gemini_keys():
+        return jsonify({"error": "Gemini API key is invalid or missing. Set GEMINI_API_KEYS and restart app."}), 500
+
+    prompt = f"""
+    You are Sakhi AI, a supportive cyber safety and legal-awareness assistant.
+    Keep response practical, concise, and safe.
+    User question: "{question}"
+    Provide:
+    1) Brief answer
+    2) 3 clear action steps
+    """
+    result = gemini_generate_text(prompt)
+    if not result:
+        return jsonify({"error": "Gemini response failed. Please try again."}), 500
+    return jsonify({"answer": result})
 
 @app.route("/api/v1/evidence/<eid>/followup", methods=["POST"])
 @login_required
@@ -1237,28 +1262,28 @@ def generate_screenshot():
 
 if __name__ == "__main__":
     print("\n" + "="*70)
-    print("  ╔═══════════════════════════════════════════════════════════════╗")
-    print("  ║   EvidenceVault — AI Cyberbullying Detection & Forensics    ║")
-    print("  ╚═══════════════════════════════════════════════════════════════╝")
+    print("  +-------------------------------------------------------------+")
+    print("  |   EvidenceVault - AI Cyberbullying Detection & Forensics   |")
+    print("  +-------------------------------------------------------------+")
     print("="*70)
-    print(f"  🔗 Dashboard: http://127.0.0.1:5000")
-    print(f"  👤 Login:     admin / admin123")
-    print(f"  🔧 Debug:     ENABLED (development mode)")
+    print(f"  Dashboard: http://127.0.0.1:5000")
+    print(f"  Login:     admin / admin123")
+    print(f"  Debug:     ENABLED (development mode)")
     print("-"*70)
-    print(f"  🤖 Detoxify ML:       {'✓ LOADED' if DETOXIFY_AVAILABLE else '✗ Not installed'}")
-    print(f"  📸 OCR (Tesseract):   {'✓ AVAILABLE' if OCR_AVAILABLE else '✗ NOT INSTALLED ⚠'}")
-    print(f"  🔑 Gemini API Keys:   {len(GEMINI_API_KEYS)} configured")
-    print(f"  🔐 Encryption:        {'✓ AVAILABLE' if ENCRYPTION_AVAILABLE else '✗ Not available'}")
+    print(f"  Detoxify ML:       {'LOADED' if DETOXIFY_AVAILABLE else 'Not installed'}")
+    print(f"  OCR (Tesseract):   {'AVAILABLE' if OCR_AVAILABLE else 'NOT INSTALLED'}")
+    print(f"  Gemini API Keys:   {len(GEMINI_API_KEYS)} configured")
+    print(f"  Encryption:        {'AVAILABLE' if ENCRYPTION_AVAILABLE else 'Not available'}")
     print("-"*70)
 
     if not OCR_AVAILABLE:
-        print("  ⚠️  WARNING: Tesseract OCR not found!")
-        print("  📖 Setup guide: See TESSERACT_SETUP.md")
-        print("  ⚙️  Windows:   choco install tesseract")
-        print("  ⚙️  macOS:     brew install tesseract")
-        print("  ⚙️  Linux:     apt install tesseract-ocr")
+        print("  WARNING: Tesseract OCR not found!")
+        print("  Setup guide: See TESSERACT_SETUP.md")
+        print("  Windows:   choco install tesseract")
+        print("  macOS:     brew install tesseract")
+        print("  Linux:     apt install tesseract-ocr")
         print("-"*70)
 
-    print(f"  ✨ Ready to process evidence!\n")
+    print(f"  Ready to process evidence!\n")
 
     app.run(debug=True, port=5000)
