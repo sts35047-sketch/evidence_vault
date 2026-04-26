@@ -574,10 +574,16 @@ async function askUserAI() {
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({ question })
         });
+        const contentType = gemRes.headers.get('content-type') || '';
+        if (!contentType.includes('application/json')) {
+            output.textContent = 'Session expired. Please log in again.';
+            if (historyBox) historyBox.innerHTML = '<strong>Mode:</strong> Login required';
+            return;
+        }
         const gemData = await gemRes.json();
         if (gemRes.ok && !gemData.error) {
             output.textContent = gemData.answer || 'No answer available.';
-            if (historyBox) historyBox.innerHTML = '<strong>Mode:</strong> Gemini (gemini-1.5-flash)';
+            if (historyBox) historyBox.innerHTML = `<strong>Mode:</strong> ${gemData.source === 'gemini' ? 'Gemini (gemini-1.5-flash)' : 'Sakhi fallback'}`;
             return;
         }
 

@@ -25,6 +25,11 @@ try:
     import google.generativeai as genai
     GEMINI_AVAILABLE = True
     GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "").strip()
+    if not GEMINI_API_KEY:
+        # Backward compatibility: allow comma-separated env and use first key only.
+        _csv_keys = [k.strip() for k in os.environ.get("GEMINI_API_KEYS", "").split(",") if k.strip()]
+        if _csv_keys:
+            GEMINI_API_KEY = _csv_keys[0]
     if GEMINI_API_KEY:
         genai.configure(api_key=GEMINI_API_KEY)
 except ImportError:
@@ -89,6 +94,10 @@ LIBRETRANSLATE_URLS = [u.strip() for u in os.environ.get("LIBRETRANSLATE_URLS", 
 LIBRETRANSLATE_API_KEYS = [k.strip() for k in os.environ.get("LIBRETRANSLATE_API_KEYS", "").split(",") if k.strip()]
 # Strict mode: one key, one model only.
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "").strip()
+if not GEMINI_API_KEY:
+    _csv_keys = [k.strip() for k in os.environ.get("GEMINI_API_KEYS", "").split(",") if k.strip()]
+    if _csv_keys:
+        GEMINI_API_KEY = _csv_keys[0]
 GEMINI_MODEL = "gemini-1.5-flash"
 ENABLE_GEMINI_INSIGHTS = os.environ.get("ENABLE_GEMINI_INSIGHTS", "0").lower() in {"1", "true", "yes", "on"}
 OCR_TRY_GEMINI_FIRST = os.environ.get("OCR_TRY_GEMINI_FIRST", "0").lower() in {"1", "true", "yes", "on"}
@@ -1206,9 +1215,11 @@ def gemini_assistant():
     if not question:
         return jsonify({"error": "Please enter a question."}), 400
     if not GEMINI_AVAILABLE:
-        return jsonify({"error": "Gemini package is not available on this system."}), 500
+        fallback = build_sakhi_response(question)
+        return jsonify({"answer": f"[Fallback] {fallback['answer']}", "source": "fallback"}), 200
     if not get_valid_gemini_keys():
-        return jsonify({"error": "Gemini API key is invalid or missing. Set GEMINI_API_KEY and restart app."}), 500
+        fallback = build_sakhi_response(question)
+        return jsonify({"answer": f"[Fallback: Gemini key missing/invalid] {fallback['answer']}", "source": "fallback"}), 200
 
     prompt = f"""
     You are Sakhi AI, a supportive cyber safety and legal-awareness assistant.
@@ -1220,8 +1231,9 @@ def gemini_assistant():
     """
     result = gemini_generate_text(prompt)
     if not result:
-        return jsonify({"error": "Gemini response failed. Please try again."}), 500
-    return jsonify({"answer": result})
+        fallback = build_sakhi_response(question)
+        return jsonify({"answer": f"[Fallback: Gemini temporary issue] {fallback['answer']}", "source": "fallback"}), 200
+    return jsonify({"answer": result, "source": "gemini"})
 
 @app.route("/api/v1/evidence/<eid>/followup", methods=["POST"])
 @login_required
