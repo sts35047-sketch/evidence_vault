@@ -405,12 +405,24 @@ SEVERE_PHRASES = [
     "kill yourself", "go die", "i will kill", "i will hurt you", "i will destroy you",
     "leak your photos", "ruin your life", "watch your back", "you should die"
 ]
+WEIGHTED_TOXIC_KW = {
+    # strong threats
+    "kill": 0.22, "murder": 0.24, "die": 0.20, "threaten": 0.18, "destroy": 0.16,
+    # explicit abuse
+    "fuck": 0.14, "bitch": 0.16, "asshole": 0.14, "retard": 0.16, "moron": 0.12,
+    "idiot": 0.12, "worthless": 0.13, "loser": 0.10, "scum": 0.13, "harass": 0.12,
+    # common Hindi/Hinglish abuse
+    "chutiya": 0.16, "madarchod": 0.2, "bhosdike": 0.2, "randi": 0.16, "kutta": 0.1,
+    "harami": 0.14, "saale": 0.1, "gandu": 0.15,
+}
 LEET_MAP = str.maketrans({
     "0": "o", "1": "i", "3": "e", "4": "a", "5": "s", "7": "t", "@": "a", "$": "s"
 })
 
 def normalize_for_toxicity(text: str) -> str:
     t = (text or "").lower().translate(LEET_MAP)
+    # collapse char repetition: fuuuuuck -> fuuck, idioooot -> idioot
+    t = re.sub(r"(.)\1{2,}", r"\1\1", t)
     # collapse repeated symbols/spaces and keep letters/numbers/basic separators
     t = re.sub(r"[^a-z0-9\s!?.,'-]", " ", t)
     t = re.sub(r"\s+", " ", t).strip()
@@ -445,13 +457,22 @@ def detect_toxicity(text: str):
         try:
             raw = model.predict(text)
             scores = {k: round(float(v), 4) for k, v in raw.items()}
-            primary = scores.get("toxicity", 0.0)
+            # Blend multiple model heads; toxicity alone can under-detect threats.
+            primary = max(
+                scores.get("toxicity", 0.0),
+                scores.get("severe_toxicity", 0.0),
+                scores.get("threat", 0.0) * 0.95,
+                scores.get("insult", 0.0) * 0.9,
+                scores.get("obscene", 0.0) * 0.85,
+            )
         except Exception: pass
 
     # Rule-based score used as fallback and booster for obvious abuse.
     hits = [kw for kw in TOXIC_KW if kw in norm_text]
     severe_hits = [p for p in SEVERE_PHRASES if p in norm_text]
-    keyword_score = min(len(hits) * 0.12 + len(severe_hits) * 0.25, 1.0)
+    weighted_hits = [kw for kw in WEIGHTED_TOXIC_KW if kw in norm_text]
+    weighted_score = sum(WEIGHTED_TOXIC_KW[kw] for kw in weighted_hits)
+    keyword_score = min(max(len(hits) * 0.1, weighted_score) + len(severe_hits) * 0.25, 1.0)
     if text.isupper():
         keyword_score = min(keyword_score + 0.12, 1.0)
     if text.count("!") >= 3:
@@ -482,7 +503,7 @@ def detect_toxicity(text: str):
     category = label_map.get(dominant, "Toxicity") if scores[dominant] > 0.1 else "Neutral"
     # Slightly more sensitive thresholds for practical moderation.
     severity = "High" if primary >= 0.7 else ("Medium" if primary >= 0.3 else "Low")
-    return category, severity, primary, scores, hits + severe_hits
+    return category, severity, primary, scores, list(dict.fromkeys(hits + weighted_hits + severe_hits))
 
 def answer_basic_user_question(question: str) -> str:
     q = (question or "").strip().lower()
