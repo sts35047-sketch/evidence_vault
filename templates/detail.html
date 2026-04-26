@@ -48,20 +48,33 @@
 
 <section class="section" style="padding-top:120px;">
   <div class="section-label reveal">CASE FORENSICS</div>
+  {% if role != 'admin' %}
+  <div class="reveal" style="margin-bottom: 12px; padding: 10px 14px; border: 1px solid rgba(167,139,250,0.4); border-radius: 8px; background: rgba(167,139,250,0.08); color: #e2e8f0;">
+    This page shows your own evidence file only.
+  </div>
+  {% endif %}
   <div style="display:flex; justify-content:space-between; align-items:flex-end; margin-bottom:2rem;">
     <h2 class="section-title reveal" style="margin:0;">Evidence <em>{{ row['evidence_id'] }}</em>.</h2>
     <div class="reveal" style="display: flex; gap: 10px; align-items: center;">
       <!-- C&D BUTTON -->
+      {% if role == 'admin' %}
       <button id="btnGenerateCD" class="btn-ghost" style="border-color: #a78bfa; color: #a78bfa;" onclick="generateCD('{{ row['evidence_id'] }}')">
           <span id="cdBtnText">DRAFT C&D LETTER (AI) ⚡</span>
       </button>
+      {% else %}
+      <button class="btn-ghost" style="border-color: #475569; color: #94a3b8; cursor: not-allowed;" disabled title="Only admin can generate legal letters">
+          DRAFT C&D LETTER (ADMIN)
+      </button>
+      {% endif %}
       
       <a href="/report/{{ row['evidence_id'] }}" class="btn-primary">DOWNLOAD PDF ↓</a>
       <a href="/report/{{ row['evidence_id'] }}/public" class="btn-ghost" style="border-color: var(--orange); color: var(--orange);">PUBLIC PDF (REDACTED) 🔒</a>
       <!-- NEW: GDPR DELETE BUTTON -->
+      {% if role == 'admin' %}
       <form action="/delete/{{ row['evidence_id'] }}" method="POST" onsubmit="return confirm('WARNING: This will permanently delete the evidence, AI logs, and uploaded files. This action is irreversible. Proceed?');" style="margin:0;">
           <button type="submit" class="btn-ghost" style="border-color: #dc2626; color: #dc2626;">PURGE (GDPR) 🗑️</button>
       </form>
+      {% endif %}
 
       <a href="/vault" class="btn-ghost" style="padding: .6rem 1rem;">← BACK</a>
     </div>
@@ -72,10 +85,12 @@
     <div class="bento-cell dark reveal">
       <div class="bento-label">METADATA</div>
       <table style="width:100%; border-collapse:collapse; margin-top:10px;">
+        {% if role == 'admin' %}
         <tr style="border-bottom:1px solid rgba(255,255,255,.05);">
           <td style="padding:8px 0; color:var(--muted); font-size:.85rem;">Case Folder</td>
           <td style="padding:8px 0; text-align:right; font-family:'Space Mono'; color:#a78bfa;">📁 {{ row['case_id'] }}</td>
         </tr>
+        {% endif %}
         <tr style="border-bottom:1px solid rgba(255,255,255,.05);">
           <td style="padding:8px 0; color:var(--muted); font-size:.85rem;">Captured On</td>
           <td style="padding:8px 0; text-align:right; font-family:'Space Mono'; color:#fff;">{{ row['created_at'] }}</td>
@@ -93,6 +108,13 @@
           </td>
         </tr>
       </table>
+      {% if role != 'admin' %}
+      <div style="margin-top: 12px; padding: 10px; border-radius: 8px; background: rgba(167,139,250,0.08); border: 1px solid rgba(167,139,250,0.35);">
+        <div style="font-size:.75rem; color:#c4b5fd; text-transform: uppercase; letter-spacing: 1px;">Your Support Contact</div>
+        <div style="font-size:.9rem; color:#fff; margin-top:4px;">{{ helper_name }}</div>
+        <div style="font-family:'Space Mono'; color:#a78bfa; font-size:.82rem;">{{ helper_email }}</div>
+      </div>
+      {% endif %}
     </div>
 
     <!-- ML Vector Box -->
@@ -199,6 +221,22 @@
       </table>
     </div>
 
+    <div class="bento-cell wide reveal" style="transition-delay:.35s">
+      <div class="bento-label">FOLLOW-UP TASKS</div>
+      <div style="font-size:.82rem; color:var(--muted); margin-bottom:10px;">Track next steps for this evidence record.</div>
+      <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(220px,1fr)); gap:10px;">
+        <label><input type="checkbox" id="fu_block_account"> Block abusive account</label>
+        <label><input type="checkbox" id="fu_report_platform"> Report platform content</label>
+        <label><input type="checkbox" id="fu_save_backup"> Save extra evidence backup</label>
+        <label><input type="checkbox" id="fu_contact_helper"> Contact assigned helper</label>
+        <label><input type="checkbox" id="fu_file_complaint"> File legal complaint/FIR</label>
+      </div>
+      <div style="margin-top:10px; display:flex; gap:8px; align-items:center;">
+        <button type="button" class="btn-primary" onclick="saveFollowUp()">SAVE TASKS</button>
+        <span id="followUpMsg" style="font-size:.82rem; color:#a78bfa;"></span>
+      </div>
+    </div>
+
   </div>
 </section>
 
@@ -210,6 +248,7 @@
 <script>
 // Ignore VS Code linting errors here! This runs perfectly in the browser.
 const highlights = {{ highlights | tojson | safe }};
+const followUpData = {{ follow_up | tojson | safe }};
 const el = document.getElementById('heatmapText');
 if(highlights && highlights.length && el){
   let html = el.textContent;
@@ -219,6 +258,11 @@ if(highlights && highlights.length && el){
   });
   el.innerHTML = html;
 }
+
+["block_account", "report_platform", "save_backup", "contact_helper", "file_complaint"].forEach((k) => {
+  const el = document.getElementById(`fu_${k}`);
+  if (el) el.checked = !!followUpData[k];
+});
 
 async function generateCD(eid) {
     const btn = document.getElementById('btnGenerateCD');
@@ -263,6 +307,30 @@ function copyCD() {
     output.select();
     document.execCommand("copy");
     alert("Copied to clipboard!");
+}
+
+async function saveFollowUp() {
+    const payload = {
+        block_account: !!document.getElementById('fu_block_account')?.checked,
+        report_platform: !!document.getElementById('fu_report_platform')?.checked,
+        save_backup: !!document.getElementById('fu_save_backup')?.checked,
+        contact_helper: !!document.getElementById('fu_contact_helper')?.checked,
+        file_complaint: !!document.getElementById('fu_file_complaint')?.checked,
+    };
+    const msg = document.getElementById('followUpMsg');
+    if (msg) msg.textContent = 'Saving...';
+    try {
+        const res = await fetch('/api/v1/evidence/{{ row["evidence_id"] }}/followup', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(payload)
+        });
+        const data = await res.json();
+        if (!res.ok || data.error) throw new Error(data.error || 'Save failed');
+        if (msg) msg.textContent = 'Tasks updated.';
+    } catch (e) {
+        if (msg) msg.textContent = `Error: ${e.message}`;
+    }
 }
 </script>
 </body>

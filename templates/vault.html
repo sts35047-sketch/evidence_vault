@@ -26,7 +26,16 @@
 
 <section class="section" style="padding-top:120px;">
   <div class="section-label reveal">SECURE STORAGE</div>
-  <h2 class="section-title reveal">Evidence <em>Vault.</em></h2>
+  <h2 class="section-title reveal">
+    {% if role == 'admin' %}Evidence <em>Vault.</em>{% else %}Your <em>Private Vault.</em>{% endif %}
+  </h2>
+  {% if role != 'admin' %}
+  <div class="reveal" style="margin-bottom: 12px; padding: 12px 14px; border: 1px solid rgba(167,139,250,0.4); border-radius: 8px; background: rgba(167,139,250,0.08);">
+    <div style="font-size: .78rem; color: #a78bfa; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 6px;">Your Access Scope</div>
+    <div style="font-size: .82rem; color: #cbd5e1; margin-bottom: 6px;">You are viewing only files and cases created under your account.</div>
+    <div style="font-size: .92rem; color: #e2e8f0;">Email: <strong>{{ email }}</strong> &nbsp;|&nbsp; Helper: <strong>{{ helper_name }}</strong> ({{ helper_email }})</div>
+  </div>
+  {% endif %}
 
   <div class="flash-container">
     {% with messages = get_flashed_messages() %}
@@ -41,6 +50,7 @@
     <input type="text" name="q" class="filter-input" placeholder="Search ID, keyword..." value="{{ q }}">
     
     <!-- CASE FOLDER DROPDOWN -->
+    {% if role == 'admin' %}
     <select name="case" class="filter-select">
       <option value="">All Case Folders</option>
       {% for c in unique_cases %}
@@ -48,6 +58,7 @@
       {% endfor %}
       <option value="Unassigned" {% if case == 'Unassigned' %}selected{% endif %}>📁 Unassigned</option>
     </select>
+    {% endif %}
 
     <select name="severity" class="filter-select">
       <option value="">All Severities</option>
@@ -60,7 +71,11 @@
     <button type="submit" class="btn-primary" style="padding:.6rem 1.4rem;">FILTER ↗</button>
     <a href="/vault" class="btn-ghost">CLEAR</a>
     
+    {% if role == 'admin' %}
     <a href="/export/csv" class="btn-ghost" style="margin-left: auto; border-color: #a78bfa; color: white;">CSV EXPORT ⬇</a>
+    {% else %}
+    <span class="btn-ghost" style="margin-left: auto; opacity: .65; cursor: not-allowed;" title="Only admin can export CSV">CSV EXPORT (ADMIN)</span>
+    {% endif %}
   </form>
 
   <div class="vault-container reveal">
@@ -68,7 +83,7 @@
       <thead>
         <tr>
           <th>ID</th>
-          <th>Case Folder</th>
+          {% if role == 'admin' %}<th>Case Folder</th>{% endif %}
           <th>Message Snippet</th>
           <th>Severity</th>
           <th>Score</th>
@@ -80,6 +95,7 @@
         {% for row in records %}
         <tr>
           <td><span class="mono-id">{{ row['evidence_id'] }}</span></td>
+          {% if role == 'admin' %}
           
           <td>
             {% if row['case_id'] and row['case_id'] != 'Unassigned' %}
@@ -88,6 +104,7 @@
               <span style="color: var(--muted); font-size: 0.8rem;">Unassigned</span>
             {% endif %}
           </td>
+          {% endif %}
           
           <td class="snippet-cell">{{ row['content'][:50] }}…</td>
           <td>
@@ -103,7 +120,7 @@
           </td>
         </tr>
         {% else %}
-        <tr><td colspan="7" style="text-align:center;color:var(--muted);padding:3rem;">No records found.</td></tr>
+        <tr><td colspan="{% if role == 'admin' %}7{% else %}6{% endif %}" style="text-align:center;color:var(--muted);padding:3rem;">No records found.</td></tr>
         {% endfor %}
       </tbody>
     </table>
@@ -115,5 +132,16 @@
   <div class="footer-copy">© 2026 EVIDENCEVAULT. ALL RIGHTS RESERVED.</div>
 </footer>
 <script src="{{ url_for('static', filename='script.js') }}"></script>
+<script>
+  (function () {
+    const filterForm = document.querySelector('.filter-bar');
+    if (!filterForm) return;
+
+    const autoFields = filterForm.querySelectorAll('select[name="severity"], select[name="case"], input[name="date"]');
+    autoFields.forEach((field) => {
+      field.addEventListener('change', () => filterForm.submit());
+    });
+  })();
+</script>
 </body>
 </html>

@@ -85,20 +85,36 @@ API_KEY     = os.environ.get("API_KEY", "evault-demo-key-2026")
 DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL", "")
 LIBRETRANSLATE_URLS = [u.strip() for u in os.environ.get("LIBRETRANSLATE_URLS", "https://libretranslate.com/translate").split(",") if u.strip()]
 LIBRETRANSLATE_API_KEYS = [k.strip() for k in os.environ.get("LIBRETRANSLATE_API_KEYS", "").split(",") if k.strip()]
-GEMINI_API_KEYS = [k.strip() for k in os.environ.get("GEMINI_API_KEYS", "AIzaSyAXTS0_F2tUzitO7GJotK2utRhX52yg3rE,AIzaSyBl1mMhNvji9d5zqa9Rq_CrC3px2R_L7PA,AIzaSyDtsZDp-S7zrOYEmQNq7z8tFemBnuKyyjU,AIzaSyBprUAY0SGr_LPbUHbkq1tGJhzKZmcdFjE,AIzaSyA0KbYd_X1DogDrpRyFq1pq3w8EFYyqUh4,AIzaSyCWop6u56oRsv45e3sIV95PlGItPaEg79o,AIzaSyDw_g5gfQertpiy-zsb7k3XGt6Z-ZnbHX0").split(",") if k.strip()]
+GEMINI_API_KEYS = [k.strip() for k in os.environ.get("GEMINI_API_KEYS", "").split(",") if k.strip()]
+ENABLE_GEMINI_INSIGHTS = os.environ.get("ENABLE_GEMINI_INSIGHTS", "0").lower() in {"1", "true", "yes", "on"}
+OCR_TRY_GEMINI_FIRST = os.environ.get("OCR_TRY_GEMINI_FIRST", "0").lower() in {"1", "true", "yes", "on"}
 
 EXECUTOR    = ThreadPoolExecutor(max_workers=4)
 
 # ── Static users ──────────────────────────────────────────────────────────────
 def _pw(p): return hashlib.sha256(p.encode()).hexdigest()
 USERS = {
-    "admin": {"password": _pw("admin123"), "role": "admin"},
-    "user":  {"password": _pw("user123"),  "role": "user"},
+    "admin": {
+        "password": _pw("admin123"),
+        "role": "admin",
+        "email": "admin@evidencevault.local",
+        "helper_name": "Platform Security Team",
+        "helper_email": "security@evidencevault.local",
+    },
+    "user": {
+        "password": _pw("user123"),
+        "role": "user",
+        "email": "user@evidencevault.local",
+        "helper_name": "Adv. Priya Sharma (Legal Helper)",
+        "helper_email": "legal.help@evidencevault.local",
+    },
 }
 
 # ── ML Models & APIs ──────────────────────────────────────────────────────────
 _model = None
 _model_lock = threading.Lock()
+_gemini_models_cache = None
+_valid_gemini_keys_cache = None
 
 def get_model():
     global _model
@@ -108,6 +124,73 @@ def get_model():
                 try: _model = _Detoxify("original")
                 except Exception: pass
     return _model
+
+def get_gemini_model_candidates():
+    global _gemini_models_cache
+    if _gemini_models_cache is not None:
+        return _gemini_models_cache
+
+    fallback = ["gemini-1.5-flash-latest", "gemini-1.5-flash", "gemini-1.5-pro", "gemini-pro"]
+    if not GEMINI_AVAILABLE or not genai:
+        _gemini_models_cache = fallback
+        return _gemini_models_cache
+
+    discovered = []
+    try:
+        for m in genai.list_models():
+            methods = getattr(m, "supported_generation_methods", []) or []
+            if "generateContent" in methods:
+                name = getattr(m, "name", "")
+                if name.startswith("models/"):
+                    name = name.split("/", 1)[1]
+                if name:
+                    discovered.append(name)
+    except Exception as e:
+        print(f"[Gemini] list_models failed: {type(e).__name__}")
+
+    # Prioritize known good families first, then append the rest.
+    preferred_order = ["gemini-1.5-flash", "gemini-1.5-pro", "gemini-pro"]
+    ordered = []
+    for p in preferred_order:
+        for d in discovered:
+            if p in d and d not in ordered:
+                ordered.append(d)
+    for d in discovered:
+        if d not in ordered:
+            ordered.append(d)
+    for f in fallback:
+        if f not in ordered:
+            ordered.append(f)
+
+    _gemini_models_cache = ordered
+    return _gemini_models_cache
+
+def get_valid_gemini_keys():
+    global _valid_gemini_keys_cache
+    if _valid_gemini_keys_cache is not None:
+        return _valid_gemini_keys_cache
+    if not GEMINI_AVAILABLE or not genai:
+        _valid_gemini_keys_cache = []
+        return _valid_gemini_keys_cache
+    valid = []
+    for k in GEMINI_API_KEYS:
+        try:
+            genai.configure(api_key=k)
+            list(genai.list_models())
+            valid.append(k)
+        except Exception as e:
+            print(f"[Gemini] Invalid API key skipped: {type(e).__name__}")
+    _valid_gemini_keys_cache = valid
+    return _valid_gemini_keys_cache
+
+def text_quality_score(text: str) -> int:
+    t = (text or "").strip()
+    if not t:
+        return 0
+    alnum = sum(1 for ch in t if ch.isalnum())
+    words = len([w for w in re.split(r"\s+", t) if w])
+    lines = len([ln for ln in t.splitlines() if ln.strip()])
+    return alnum + words * 5 + lines * 2
 
 def translate_text(text: str):
     if not text.strip():
@@ -119,7 +202,7 @@ def translate_text(text: str):
                 payload = {"q": text, "source": "auto", "target": "en"}
                 if api_key:
                     payload["api_key"] = api_key
-                resp = requests.post(url, json=payload, headers={"Content-Type": "application/json"}, timeout=5)
+                resp = requests.post(url, json=payload, headers={"Content-Type": "application/json"}, timeout=2.5)
                 resp.raise_for_status()
                 data = resp.json()
                 translated = data.get("translatedText", text)
@@ -136,6 +219,9 @@ def translate_text(text: str):
 def get_gemini_insights(text: str):
     if not GEMINI_AVAILABLE or not genai:
         return None
+    valid_keys = get_valid_gemini_keys()
+    if not valid_keys:
+        return None
 
     prompt = f"""
     You are an expert legal forensics AI analyzing potential cyberbullying/harassment evidence.
@@ -149,12 +235,11 @@ def get_gemini_insights(text: str):
     Text to analyze: "{text}"
     """
 
-    for api_key in GEMINI_API_KEYS or [None]:
+    for api_key in valid_keys:
         try:
             if api_key:
                 genai.configure(api_key=api_key)
-            # Try gemini-1.5-flash first, fall back to gemini-pro
-            for model_name in ['gemini-1.5-flash', 'gemini-pro']:
+            for model_name in get_gemini_model_candidates():
                 try:
                     model = genai.GenerativeModel(model_name)
                     response = model.generate_content(prompt)
@@ -178,46 +263,38 @@ def extract_text_from_image(image_path: str) -> str:
         return ""
 
     file_size = os.path.getsize(image_path)
-    if file_size > 20 * 1024 * 1024:
-        print(f"[Vision OCR] File too large ({file_size} bytes), skipping Gemini")
-    else:
-        if GEMINI_AVAILABLE and genai:
-            for idx, api_key in enumerate(GEMINI_API_KEYS or [None], 1):
-                try:
-                    print(f"[Vision OCR] Trying Gemini key #{idx}...")
-                    if api_key:
-                        genai.configure(api_key=api_key)
+    valid_keys = get_valid_gemini_keys()
+    if OCR_TRY_GEMINI_FIRST and file_size <= 20 * 1024 * 1024 and GEMINI_AVAILABLE and genai and valid_keys:
+        for idx, api_key in enumerate(valid_keys, 1):
+            try:
+                print(f"[Vision OCR] Trying Gemini key #{idx}...")
+                if api_key:
+                    genai.configure(api_key=api_key)
+                for model_name in get_gemini_model_candidates():
+                    try:
+                        vision_model = genai.GenerativeModel(model_name)
+                        from PIL import Image
+                        img = Image.open(image_path)
+                        print(f"[Vision OCR] Trying {model_name} (size: {file_size} bytes)...")
+                        v_resp = vision_model.generate_content(
+                            [
+                                "Extract ALL readable text from this image. Reply ONLY with the text content. If no text, reply: NO_TEXT_FOUND",
+                                img,
+                            ],
+                            request_options={"timeout": 30},
+                        )
+                        extracted = v_resp.text.strip()
+                        if extracted and "NO_TEXT_FOUND" not in extracted and len(extracted) >= 12:
+                            print(f"[Vision OCR] ✓ Success with {model_name}")
+                            return extracted
+                    except Exception as model_err:
+                        print(f"[Vision OCR] {model_name} failed: {type(model_err).__name__}")
+                        continue
+            except Exception as e:
+                print(f"[Vision OCR] Key #{idx} error: {type(e).__name__}: {str(e)[:80]}")
+                continue
 
-                    # Try both models
-                    for model_name in ['gemini-1.5-flash', 'gemini-pro-vision', 'gemini-pro']:
-                        try:
-                            vision_model = genai.GenerativeModel(model_name)
-                            from PIL import Image
-                            img = Image.open(image_path)
-                            print(f"[Vision OCR] Trying {model_name} (size: {file_size} bytes)...")
-
-                            v_resp = vision_model.generate_content(
-                                [
-                                    "Extract ALL readable text from this image. Reply ONLY with the text content. If no text, reply: NO_TEXT_FOUND",
-                                    img,
-                                ],
-                                request_options={"timeout": 30},
-                            )
-
-                            extracted = v_resp.text.strip()
-                            if extracted and "NO_TEXT_FOUND" not in extracted:
-                                print(f"[Vision OCR] ✓ Success with {model_name}")
-                                return extracted
-                            print(f"[Vision OCR] No text detected with {model_name}")
-
-                        except Exception as model_err:
-                            print(f"[Vision OCR] {model_name} failed: {type(model_err).__name__}")
-                            continue
-                except Exception as e:
-                    print(f"[Vision OCR] Key #{idx} error: {type(e).__name__}: {str(e)[:80]}")
-                    continue
-
-    print("[Vision OCR] Falling back to Tesseract OCR...")
+    print("[Vision OCR] Using fast local OCR path (Tesseract)...")
     if not OCR_AVAILABLE:
         print("[Tesseract] Not available - install via: pip install pytesseract")
         return ""
@@ -235,12 +312,23 @@ def extract_text_from_image(image_path: str) -> str:
         candidates.append(("autocontrast", ImageOps.autocontrast(gray)))
         candidates.append(("resize", gray.resize((max(800, gray.width * 2), max(800, gray.height * 2)), Image.LANCZOS)))
 
+        best_text = ""
+        best_score = 0
+        ocr_configs = ["--oem 3 --psm 6", "--oem 3 --psm 11", "--oem 3 --psm 4"]
         for name, img in candidates:
             try:
                 start = time.time()
-                text = pytesseract.image_to_string(img).strip()
+                text = ""
+                for cfg in ocr_configs:
+                    cur = pytesseract.image_to_string(img, config=cfg).strip()
+                    if text_quality_score(cur) > text_quality_score(text):
+                        text = cur
                 elapsed = time.time() - start
-                if text:
+                score = text_quality_score(text)
+                if score > best_score:
+                    best_text = text
+                    best_score = score
+                if score >= 90:
                     print(f"[Tesseract OCR] ✓ Extracted text using {name} in {elapsed:.2f}s")
                     return text
                 print(f"[Tesseract OCR] No text detected with {name} (took {elapsed:.2f}s)")
@@ -251,8 +339,11 @@ def extract_text_from_image(image_path: str) -> str:
         # Final pass: binarize
         try:
             bw = gray.point(lambda x: 0 if x < 128 else 255, mode="1")
-            text = pytesseract.image_to_string(bw).strip()
-            if text:
+            text = pytesseract.image_to_string(bw, config="--oem 3 --psm 11").strip()
+            if text_quality_score(text) > best_score:
+                best_text = text
+                best_score = text_quality_score(text)
+            if text_quality_score(text) >= 90:
                 print(f"[Tesseract OCR] ✓ Extracted text using binarized image")
                 return text
             print("[Tesseract OCR] No text detected after binarization")
@@ -261,6 +352,33 @@ def extract_text_from_image(image_path: str) -> str:
 
     except Exception as e:
         print(f"[Vision OCR] Tesseract preprocessing failed: {type(e).__name__}: {str(e)[:100]}")
+
+    if best_score >= 30:
+        return best_text
+
+    # Final network fallback for hard images even when local OCR fails/weak.
+    if file_size <= 20 * 1024 * 1024 and GEMINI_AVAILABLE and genai and valid_keys:
+        for idx, api_key in enumerate(valid_keys, 1):
+            try:
+                if api_key:
+                    genai.configure(api_key=api_key)
+                for model_name in get_gemini_model_candidates():
+                    try:
+                        vision_model = genai.GenerativeModel(model_name)
+                        from PIL import Image
+                        img = Image.open(image_path)
+                        v_resp = vision_model.generate_content(
+                            ["Extract all visible text from this image. Return only plain extracted text.", img],
+                            request_options={"timeout": 20},
+                        )
+                        extracted = (v_resp.text or "").strip()
+                        if extracted and "NO_TEXT_FOUND" not in extracted:
+                            print(f"[Vision OCR fallback] ✓ Success with {model_name}")
+                            return extracted
+                    except Exception:
+                        continue
+            except Exception:
+                continue
 
     return ""
 
@@ -280,6 +398,24 @@ def calculate_sentiment_extensions(text: str, scores: dict):
     return scores
 
 TOXIC_KW = ["hate","stupid","idiot","kill","die","fuck","shit","damn","asshole","bitch","ugly","worthless","loser","trash","moron","scum","disgusting","filth","retard","freak","murder","destroy","abuse","harass","threaten"]
+
+BASIC_USER_QA = {
+    "what is cyberbullying": "Cyberbullying is repeated harmful behavior through digital platforms, including threats, humiliation, blackmail, and abusive messages.",
+    "how to report cyberbullying": "Save evidence first (screenshots, chat logs, links, timestamps), then report to the platform, local cybercrime portal, and police if threats are serious.",
+    "what evidence should i collect": "Collect screenshots, user profile links, message timestamps, emails, call logs, and any files shared by the offender. Keep originals unchanged.",
+    "is screenshot legal evidence": "Yes, screenshots can support legal complaints, especially when timestamped and preserved with metadata and hash verification.",
+    "how to stay safe online": "Use private accounts, strong unique passwords, 2FA, block abusive users, avoid sharing live location, and inform a trusted adult or legal helper.",
+    "what to do if threatened": "If there is an immediate threat, contact emergency services/police right away. Do not engage further with the abuser and preserve all evidence.",
+    "can i delete my evidence": "Yes. In this system, admins can perform GDPR-compliant purge when requested and authorized."
+}
+
+DEFAULT_FOLLOW_UP = {
+    "block_account": False,
+    "report_platform": False,
+    "save_backup": False,
+    "contact_helper": False,
+    "file_complaint": False,
+}
 
 def detect_toxicity(text: str):
     if not text.strip(): return "None", "Low", 0.0, {}, []
@@ -306,6 +442,62 @@ def detect_toxicity(text: str):
     severity = "High" if primary >= 0.75 else ("Medium" if primary >= 0.40 else "Low")
     return category, severity, primary, scores, [kw for kw in TOXIC_KW if kw in text.lower()]
 
+def answer_basic_user_question(question: str) -> str:
+    q = (question or "").strip().lower()
+    if not q:
+        return "Please type your question. Example: 'What evidence should I collect?'"
+
+    for key, answer in BASIC_USER_QA.items():
+        if key in q:
+            return answer
+
+    if any(k in q for k in ["threat", "danger", "kill", "suicide", "attack", "hurt"]):
+        return "If someone is in immediate danger, contact emergency services/police now. Preserve messages/screenshots and avoid direct confrontation."
+    if any(k in q for k in ["password", "account", "hack", "security", "otp"]):
+        return "Secure your account immediately: change password, enable 2FA, check login sessions, revoke unknown devices, and save incident evidence."
+    if any(k in q for k in ["law", "legal", "complaint", "fir", "report"]):
+        return "For legal action, keep evidence intact, note dates/times, and file a complaint through official cybercrime channels and police support."
+
+    return "I can help with cyberbullying basics, evidence collection, safety steps, reporting, and legal next steps. Try asking one of the suggested questions."
+
+def get_follow_up_tasks(raw_json: str):
+    data = {}
+    try:
+        data = json.loads(raw_json or "{}")
+    except Exception:
+        data = {}
+    out = dict(DEFAULT_FOLLOW_UP)
+    for k in DEFAULT_FOLLOW_UP:
+        out[k] = bool(data.get(k, False))
+    return out
+
+def build_sakhi_response(question: str):
+    answer = answer_basic_user_question(question)
+    q = (question or "").lower()
+    steps = [
+        "Preserve screenshots/chats with timestamps.",
+        "Avoid editing original evidence files.",
+        "Report abusive profile on the platform.",
+    ]
+    if any(k in q for k in ["threat", "danger", "kill", "hurt", "attack"]):
+        steps = [
+            "If danger is immediate, contact police/emergency now.",
+            "Do not engage with the aggressor further.",
+            "Share evidence with your assigned helper promptly.",
+        ]
+    elif any(k in q for k in ["password", "hack", "account", "otp", "security"]):
+        steps = [
+            "Change password immediately and enable 2FA.",
+            "Review active sessions and revoke unknown devices.",
+            "Keep screenshots of suspicious alerts and messages.",
+        ]
+    suggestions = [
+        "What evidence should I collect?",
+        "How do I report cyberbullying?",
+        "What to do if threatened?",
+    ]
+    return {"answer": answer, "action_steps": steps, "suggested_questions": suggestions}
+
 # ── Database ──────────────────────────────────────────────────────────────────
 def get_db():
     conn = sqlite3.connect(DB_PATH, check_same_thread=False)
@@ -331,6 +523,10 @@ def init_db():
         """)
         try: c.execute("ALTER TABLE evidence ADD COLUMN case_id TEXT DEFAULT 'Unassigned'")
         except sqlite3.OperationalError: pass
+        try: c.execute("ALTER TABLE evidence ADD COLUMN created_by TEXT DEFAULT 'admin'")
+        except sqlite3.OperationalError: pass
+        try: c.execute("ALTER TABLE evidence ADD COLUMN follow_up_json TEXT DEFAULT '{}'")
+        except sqlite3.OperationalError: pass
 
 init_db()
 
@@ -347,10 +543,10 @@ def blockchain_anchor(hash_val: str) -> str:
     with open(CHAIN_PATH, "w") as f: json.dump(ledger, f, indent=2)
     return block["block_hash"][:16].upper()
 
-def save_record(evidence_id, content, category, severity, score, scores_json, hash_val, filename, chain_tx, ts, case_id="Unassigned"):
+def save_record(evidence_id, content, category, severity, score, scores_json, hash_val, filename, chain_tx, ts, case_id="Unassigned", created_by="admin"):
     enc_content = encrypt_text(content) # Encrypt before saving to DB
     with get_db() as c:
-        c.execute("""INSERT OR IGNORE INTO evidence (evidence_id,content,category,severity,score,scores_json,hash,filename,chain_tx,created_at,case_id) VALUES(?,?,?,?,?,?,?,?,?,?,?)""", (evidence_id, enc_content, category, severity, score, scores_json, hash_val, filename, chain_tx, ts, case_id))
+        c.execute("""INSERT OR IGNORE INTO evidence (evidence_id,content,category,severity,score,scores_json,hash,filename,chain_tx,created_at,case_id,created_by,follow_up_json) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)""", (evidence_id, enc_content, category, severity, score, scores_json, hash_val, filename, chain_tx, ts, case_id, created_by, json.dumps(DEFAULT_FOLLOW_UP)))
 
 def send_alert(evidence_id, text, score):
     def _go():
@@ -459,6 +655,9 @@ def login():
         user  = USERS.get(uname)
         if user and user["password"] == _pw(request.form.get("password","")):
             session["username"], session["role"] = uname, user["role"]
+            session["email"] = user.get("email", "")
+            session["helper_name"] = user.get("helper_name", "Support Team")
+            session["helper_email"] = user.get("helper_email", "support@evidencevault.local")
             return redirect(url_for("home"))
         flash("Invalid credentials.")
     return render_template("login.html")
@@ -471,18 +670,62 @@ def logout():
 @login_required
 def home():
     with get_db() as c:
-        total = c.execute("SELECT COUNT(*) FROM evidence").fetchone()[0]
-        high = c.execute("SELECT COUNT(*) FROM evidence WHERE severity='High'").fetchone()[0]
-        medium = c.execute("SELECT COUNT(*) FROM evidence WHERE severity='Medium'").fetchone()[0]
-        low = c.execute("SELECT COUNT(*) FROM evidence WHERE severity='Low'").fetchone()[0]
-        trend = c.execute("SELECT strftime('%Y-%m', created_at) m, COUNT(*) n FROM evidence GROUP BY m ORDER BY m DESC LIMIT 6").fetchall()
-    return render_template("index.html", total=total, high=high, medium=medium, low=low, trend_labels=json.dumps([r["m"] for r in reversed(trend)]), trend_data=json.dumps([r["n"] for r in reversed(trend)]), username=session["username"], role=session["role"], ocr_available=OCR_AVAILABLE, detoxify_available=DETOXIFY_AVAILABLE, encryption_available=ENCRYPTION_AVAILABLE)
+        escalation_queue = []
+        if session.get("role") == "admin":
+            total = c.execute("SELECT COUNT(*) FROM evidence").fetchone()[0]
+            high = c.execute("SELECT COUNT(*) FROM evidence WHERE severity='High'").fetchone()[0]
+            medium = c.execute("SELECT COUNT(*) FROM evidence WHERE severity='Medium'").fetchone()[0]
+            low = c.execute("SELECT COUNT(*) FROM evidence WHERE severity='Low'").fetchone()[0]
+            trend = c.execute("SELECT strftime('%Y-%m', created_at) m, COUNT(*) n FROM evidence GROUP BY m ORDER BY m DESC LIMIT 6").fetchall()
+            queue_rows = c.execute("SELECT evidence_id, severity, created_at, category, score, follow_up_json FROM evidence WHERE severity IN ('High','Medium') ORDER BY id DESC LIMIT 20").fetchall()
+            for r in queue_rows:
+                tasks = get_follow_up_tasks(r["follow_up_json"])
+                pending_count = sum(1 for v in tasks.values() if not v)
+                if pending_count > 0:
+                    escalation_queue.append({
+                        "evidence_id": r["evidence_id"],
+                        "severity": r["severity"],
+                        "created_at": r["created_at"],
+                        "category": r["category"],
+                        "score_pct": int(float(r["score"] or 0) * 100),
+                        "pending_count": pending_count,
+                    })
+            escalation_queue = escalation_queue[:8]
+        else:
+            uname = session.get("username")
+            total = c.execute("SELECT COUNT(*) FROM evidence WHERE created_by=?", (uname,)).fetchone()[0]
+            high = c.execute("SELECT COUNT(*) FROM evidence WHERE created_by=? AND severity='High'", (uname,)).fetchone()[0]
+            medium = c.execute("SELECT COUNT(*) FROM evidence WHERE created_by=? AND severity='Medium'", (uname,)).fetchone()[0]
+            low = c.execute("SELECT COUNT(*) FROM evidence WHERE created_by=? AND severity='Low'", (uname,)).fetchone()[0]
+            trend = c.execute("SELECT strftime('%Y-%m', created_at) m, COUNT(*) n FROM evidence WHERE created_by=? GROUP BY m ORDER BY m DESC LIMIT 6", (uname,)).fetchall()
+
+    return render_template(
+        "index.html",
+        total=total,
+        high=high,
+        medium=medium,
+        low=low,
+        trend_labels=json.dumps([r["m"] for r in reversed(trend)]),
+        trend_data=json.dumps([r["n"] for r in reversed(trend)]),
+        username=session["username"],
+        role=session["role"],
+        email=session.get("email", ""),
+        helper_name=session.get("helper_name", "Support Team"),
+        helper_email=session.get("helper_email", "support@evidencevault.local"),
+        escalation_queue=escalation_queue,
+        ocr_available=OCR_AVAILABLE,
+        detoxify_available=DETOXIFY_AVAILABLE,
+        encryption_available=ENCRYPTION_AVAILABLE
+    )
 
 @app.route("/analyze", methods=["POST"])
 @login_required
 def analyze():
     text = request.form.get("message","").strip()
-    case_id = request.form.get("case_id", "").strip() or "Unassigned"
+    if session.get("role") == "admin":
+        case_id = request.form.get("case_id", "").strip() or "Unassigned"
+    else:
+        case_id = "Private"
     file = request.files.get("image")
     filename = ""
 
@@ -516,8 +759,10 @@ def analyze():
 
     cat, sev, score, scores, highlights = detect_toxicity(translated_text)
     
-    gemini_data = get_gemini_insights(display_text)
-    if gemini_data: scores["gemini_insights"] = gemini_data
+    if ENABLE_GEMINI_INSIGHTS and score >= 0.6:
+        gemini_data = get_gemini_insights(display_text)
+        if gemini_data:
+            scores["gemini_insights"] = gemini_data
     
     hval = sha256(display_text, ts)
     
@@ -530,7 +775,7 @@ def analyze():
     chain = blockchain_anchor(hval)
     sjson = json.dumps({**scores, "highlights": highlights})
 
-    save_record(eid, display_text, cat, sev, round(score,4), sjson, hval, filename, chain, ts, case_id)
+    save_record(eid, display_text, cat, sev, round(score,4), sjson, hval, filename, chain, ts, case_id, created_by=session.get("username", "user"))
     if sev == "High": send_alert(eid, display_text, score)
 
     flash(f"✓ Evidence {eid} secured in Case '{case_id}' | Severity: {sev}")
@@ -539,17 +784,30 @@ def analyze():
 @app.route("/vault")
 @login_required
 def vault():
-    q, sev, date, case = request.args.get("q","").strip(), request.args.get("severity",""), request.args.get("date",""), request.args.get("case","").strip()
+    q = request.args.get("q", "").strip()
+    sev_input = request.args.get("severity", "").strip()
+    date = request.args.get("date", "")
+    case = request.args.get("case", "").strip()
+    sev_map = {"high": "High", "medium": "Medium", "mid": "Medium", "low": "Low"}
+    sev = sev_map.get(sev_input.lower(), sev_input)
     sql, par = "SELECT * FROM evidence WHERE 1=1", []
+    if session.get("role") != "admin":
+        sql += " AND created_by=?"
+        par.append(session.get("username"))
     if q: sql += " AND (evidence_id LIKE ? OR category LIKE ?)"; par += [f"%{q}%", f"%{q}%"]
-    if sev: sql += " AND severity=?"; par.append(sev)
+    if sev: sql += " AND LOWER(TRIM(severity)) = LOWER(?)"; par.append(sev)
     if date: sql += " AND created_at LIKE ?"; par.append(f"{date}%")
-    if case: sql += " AND case_id=?"; par.append(case)
+    if case and session.get("role") == "admin":
+        sql += " AND case_id=?"
+        par.append(case)
     sql += " ORDER BY id DESC"
     
     with get_db() as c:
         records_raw = c.execute(sql, par).fetchall()
-        unique_cases = [r['case_id'] for r in c.execute("SELECT DISTINCT case_id FROM evidence WHERE case_id != 'Unassigned'").fetchall()]
+        if session.get("role") == "admin":
+            unique_cases = [r['case_id'] for r in c.execute("SELECT DISTINCT case_id FROM evidence WHERE case_id != 'Unassigned'").fetchall()]
+        else:
+            unique_cases = []
     
     # Decrypt content before sending to template.
     # Content is encrypted at rest, so text search must run after decryption.
@@ -562,7 +820,7 @@ def vault():
             continue
         records.append(r_dict)
         
-    return render_template("vault.html", records=records, q=q, severity=sev, date=date, case=case, unique_cases=unique_cases, username=session["username"], role=session["role"])
+    return render_template("vault.html", records=records, q=q, severity=sev, date=date, case=case, unique_cases=unique_cases, username=session["username"], role=session["role"], email=session.get("email", ""), helper_name=session.get("helper_name", "Support Team"), helper_email=session.get("helper_email", "support@evidencevault.local"))
 
 @app.route("/evidence/<eid>")
 @login_required
@@ -570,21 +828,30 @@ def detail(eid):
     with get_db() as c:
         row_raw = c.execute("SELECT * FROM evidence WHERE evidence_id=?", (eid,)).fetchone()
     if not row_raw: return "Evidence not found", 404
+    if session.get("role") != "admin" and row_raw["created_by"] != session.get("username"):
+        flash("⚠ Unauthorized: You can only view your own evidence.")
+        return redirect(url_for("vault"))
     
     row = dict(row_raw)
     row["content"] = decrypt_text(row["content"]) # Decrypt for viewing
+    follow_up = get_follow_up_tasks(row.get("follow_up_json"))
     
     try: scores_raw = json.loads(row["scores_json"])
     except: scores_raw = {}
     highlights = scores_raw.pop("highlights", [])
     gemini_insights = scores_raw.pop("gemini_insights", None)
     
-    return render_template("detail.html", row=row, scores=scores_raw, highlights=highlights, gemini_insights=gemini_insights, username=session["username"], role=session["role"])
+    return render_template("detail.html", row=row, follow_up=follow_up, scores=scores_raw, highlights=highlights, gemini_insights=gemini_insights, username=session["username"], role=session["role"], email=session.get("email", ""), helper_name=session.get("helper_name", "Support Team"), helper_email=session.get("helper_email", "support@evidencevault.local"))
 
 @app.route("/uploads/<filename>")
 @login_required
 def get_upload(filename):
     """Route to serve watermarked forensic images"""
+    if session.get("role") != "admin":
+        with get_db() as c:
+            owner_row = c.execute("SELECT created_by FROM evidence WHERE filename=?", (filename,)).fetchone()
+        if not owner_row or owner_row["created_by"] != session.get("username"):
+            return "Unauthorized", 403
     return send_from_directory(UPLOAD_FOLDER, filename)
 
 @app.route("/delete/<eid>", methods=["POST"])
@@ -614,6 +881,8 @@ def delete_evidence(eid):
 def report(eid):
     with get_db() as c: row_raw = c.execute("SELECT * FROM evidence WHERE evidence_id=?", (eid,)).fetchone()
     if not row_raw: return "Evidence not found", 404
+    if session.get("role") != "admin" and row_raw["created_by"] != session.get("username"):
+        return "Unauthorized", 403
     
     row = dict(row_raw)
     row["content"] = decrypt_text(row["content"]) # Decrypt for PDF Generation
@@ -628,6 +897,8 @@ def report_public(eid):
     """Generates a Public PDF with names/entities redacted"""
     with get_db() as c: row_raw = c.execute("SELECT * FROM evidence WHERE evidence_id=?", (eid,)).fetchone()
     if not row_raw: return "Evidence not found", 404
+    if session.get("role") != "admin" and row_raw["created_by"] != session.get("username"):
+        return "Unauthorized", 403
     
     row = dict(row_raw)
     row["content"] = decrypt_text(row["content"])
@@ -637,6 +908,7 @@ def report_public(eid):
     return send_file(fname, as_attachment=True, download_name=f"EvidenceVault_{eid}_REDACTED.pdf")
 
 @app.route("/verify", methods=["GET", "POST"])
+@login_required
 def verify():
     result = None
     search_hash = ""
@@ -644,7 +916,10 @@ def verify():
         search_hash = request.form.get("hash", "").strip()
         if search_hash:
             with get_db() as c:
-                row = c.execute("SELECT * FROM evidence WHERE hash=?", (search_hash,)).fetchone()
+                if session.get("role") == "admin":
+                    row = c.execute("SELECT * FROM evidence WHERE hash=?", (search_hash,)).fetchone()
+                else:
+                    row = c.execute("SELECT * FROM evidence WHERE hash=? AND created_by=?", (search_hash, session.get("username"))).fetchone()
             if row:
                 chain_valid = False
                 try:
@@ -666,6 +941,9 @@ def legal(): return render_template("legal.html", username=session["username"], 
 @app.route("/export/csv")
 @login_required
 def export_csv():
+    if session.get("role") != "admin":
+        flash("⚠ Unauthorized: Only Administrators can export vault data.")
+        return redirect(url_for("vault"))
     with get_db() as c: records = c.execute("SELECT evidence_id, case_id, category, severity, score, created_at, content FROM evidence ORDER BY id DESC").fetchall()
     def generate():
         data = StringIO(); writer = csv.writer(data)
@@ -692,16 +970,47 @@ def api_analyze():
     
     if data.get("preview"): return jsonify({"category": cat, "severity": sev, "score": round(score, 4), "scores": scores})
     
-    gemini_data = get_gemini_insights(display_text)
-    if gemini_data: scores["gemini_insights"] = gemini_data
+    if ENABLE_GEMINI_INSIGHTS and score >= 0.6:
+        gemini_data = get_gemini_insights(display_text)
+        if gemini_data:
+            scores["gemini_insights"] = gemini_data
         
     eid, ts = uuid.uuid4().hex[:8].upper(), datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     hval = sha256(display_text, ts); chain = blockchain_anchor(hval)
     sjson = json.dumps({**scores, "highlights": highlights})
     
-    save_record(eid, display_text, cat, sev, round(score,4), sjson, hval, "", chain, ts, case_id=data.get("case_id", "Unassigned"))
+    save_record(eid, display_text, cat, sev, round(score,4), sjson, hval, "", chain, ts, case_id=data.get("case_id", "Unassigned"), created_by=data.get("created_by", "api"))
     if sev == "High": send_alert(eid, display_text, score)
     return jsonify({"evidence_id": eid, "category": cat, "severity": sev, "score": round(score,4), "scores": scores, "hash": hval})
+
+@app.route("/api/v1/user_assistant", methods=["POST"])
+@login_required
+def user_assistant():
+    data = request.get_json(force=True) or {}
+    question = data.get("question", "").strip()
+    payload = build_sakhi_response(question)
+    history = session.get("sakhi_history", [])
+    history.append({"q": question, "a": payload["answer"]})
+    session["sakhi_history"] = history[-5:]
+    payload["history"] = session.get("sakhi_history", [])
+    return jsonify(payload)
+
+@app.route("/api/v1/evidence/<eid>/followup", methods=["POST"])
+@login_required
+def update_follow_up(eid):
+    data = request.get_json(force=True) or {}
+    with get_db() as c:
+        row = c.execute("SELECT evidence_id, created_by, follow_up_json FROM evidence WHERE evidence_id=?", (eid,)).fetchone()
+        if not row:
+            return jsonify({"error": "Evidence not found"}), 404
+        if session.get("role") != "admin" and row["created_by"] != session.get("username"):
+            return jsonify({"error": "Unauthorized"}), 403
+        current = get_follow_up_tasks(row["follow_up_json"])
+        for k in DEFAULT_FOLLOW_UP.keys():
+            if k in data:
+                current[k] = bool(data[k])
+        c.execute("UPDATE evidence SET follow_up_json=? WHERE evidence_id=?", (json.dumps(current), eid))
+    return jsonify({"ok": True, "follow_up": current})
 
 @app.route("/api/v1/ocr_preview", methods=["POST"])
 @login_required
@@ -793,15 +1102,26 @@ def extract_text_from_image_buffer(image_bytes: bytes) -> str:
             ("autocontrast", ImageOps.autocontrast(base_image.convert("L"))),
         ]
         
+        best_text = ""
+        best_score = 0
+        ocr_configs = ["--oem 3 --psm 6", "--oem 3 --psm 11", "--oem 3 --psm 4"]
         for name, img in candidates:
             try:
                 start = time.time()
-                text = pytesseract.image_to_string(img).strip()
+                text = ""
+                for cfg in ocr_configs:
+                    cur = pytesseract.image_to_string(img, config=cfg).strip()
+                    if text_quality_score(cur) > text_quality_score(text):
+                        text = cur
                 elapsed = time.time() - start
                 
                 print(f"[OCR Buffer] {name}: {len(text)} chars in {elapsed:.2f}s")
                 
-                if text and len(text) > 2:
+                score = text_quality_score(text)
+                if score > best_score:
+                    best_text = text
+                    best_score = score
+                if score >= 90:
                     print(f"[OCR Buffer] ✓ Success with {name}")
                     return text
             except Exception as e:
@@ -813,17 +1133,24 @@ def extract_text_from_image_buffer(image_bytes: bytes) -> str:
             gray = base_image.convert("L")
             bw = gray.point(lambda x: 0 if x < 128 else 255, mode="1")
             start = time.time()
-            text = pytesseract.image_to_string(bw).strip()
+            text = pytesseract.image_to_string(bw, config="--oem 3 --psm 11").strip()
             elapsed = time.time() - start
             
             print(f"[OCR Buffer] binarized: {len(text)} chars in {elapsed:.2f}s")
             
-            if text and len(text) > 2:
+            score = text_quality_score(text)
+            if score > best_score:
+                best_text = text
+                best_score = score
+            if score >= 90:
                 print(f"[OCR Buffer] ✓ Success with binarization")
                 return text
         except Exception as bin_err:
             print(f"[OCR Buffer] binarization failed: {type(bin_err).__name__}: {str(bin_err)[:100]}")
         
+        if best_score >= 30:
+            print(f"[OCR Buffer] Returning best-effort OCR text (score={best_score})")
+            return best_text
         print(f"[OCR Buffer] ⚠ No text extracted from image")
         
     except Exception as e:
@@ -834,27 +1161,49 @@ def extract_text_from_image_buffer(image_bytes: bytes) -> str:
 @app.route("/api/v1/generate_cd/<eid>", methods=["POST"])
 @login_required
 def generate_cd(eid):
-    if not GEMINI_AVAILABLE: return jsonify({"error": "Gemini API is not configured."}), 500
+    if session.get("role") != "admin":
+        return jsonify({"error": "Only Administrators can generate AI legal letters."}), 403
+    valid_keys = get_valid_gemini_keys()
+    if not GEMINI_AVAILABLE or not valid_keys:
+        return jsonify({"error": "Gemini is not configured. Add a valid key in GEMINI_API_KEYS env and restart app."}), 500
     with get_db() as c: row_raw = c.execute("SELECT * FROM evidence WHERE evidence_id=?", (eid,)).fetchone()
     if not row_raw: return jsonify({"error": "Evidence not found."}), 404
         
     row = dict(row_raw)
     row["content"] = decrypt_text(row["content"]) # Decrypt so Gemini can read it
         
-    try:
-        model = genai.GenerativeModel('gemini-1.5-flash')
-        prompt = f"""
-        You are a tough, professional lawyer. Based on the following abusive evidence, draft a formal Cease and Desist letter.
-        The letter should demand the sender immediately stop all harassment and communication, or further legal action will be taken.
-        Use placeholders like [Sender Name], [Your Name], and [Date] if specific names are not present in the text.
-        Keep the tone strictly legal, objective, and assertive.
-        Evidence Text: "{row['content']}"
-        """
-        response = model.generate_content(prompt)
-        return jsonify({"letter": response.text})
-    except Exception as e:
-        print(f"[Gemini C&D Error] {e}")
-        return jsonify({"error": "Failed to generate letter."}), 500
+    prompt = f"""
+    You are a tough, professional lawyer. Based on the following abusive evidence, draft a formal Cease and Desist letter.
+    The letter should demand the sender immediately stop all harassment and communication, or further legal action will be taken.
+    Use placeholders like [Sender Name], [Your Name], and [Date] if specific names are not present in the text.
+    Keep the tone strictly legal, objective, and assertive.
+    Evidence Text: "{row['content']}"
+    """
+
+    last_err = None
+    for api_key in valid_keys:
+        try:
+            if api_key:
+                genai.configure(api_key=api_key)
+            for model_name in get_gemini_model_candidates():
+                try:
+                    model = genai.GenerativeModel(model_name)
+                    response = model.generate_content(prompt)
+                    letter_text = (getattr(response, "text", "") or "").strip()
+                    if letter_text:
+                        print(f"[Gemini C&D] ✓ Success with {model_name}")
+                        return jsonify({"letter": letter_text})
+                except Exception as model_err:
+                    last_err = model_err
+                    print(f"[Gemini C&D] {model_name} failed: {type(model_err).__name__}")
+                    continue
+        except Exception as e:
+            last_err = e
+            print(f"[Gemini C&D] key failed: {type(e).__name__}: {str(e)[:120]}")
+            continue
+
+    print(f"[Gemini C&D Error] {type(last_err).__name__ if last_err else 'UnknownError'}")
+    return jsonify({"error": "AI letter service is temporarily unavailable. Please try again in a minute."}), 500
 
 # --- NEW: GENERATE TEST SCREENSHOT ---
 @app.route("/test/generate_screenshot")

@@ -17,6 +17,61 @@
       font-family: 'DM Sans', sans-serif; 
   }
   .case-input::placeholder { color: rgba(255,255,255,0.4); }
+  .ai-float-btn {
+      position: fixed;
+      right: 24px;
+      bottom: 24px;
+      z-index: 9999;
+      width: 58px;
+      height: 58px;
+      border-radius: 50%;
+      border: 1px solid rgba(167,139,250,.7);
+      background: radial-gradient(circle at 30% 30%, #a78bfa, #7c3aed);
+      color: #fff;
+      font-size: 1.25rem;
+      box-shadow: 0 12px 30px rgba(124,58,237,.35);
+      cursor: pointer;
+  }
+  .ai-panel {
+      position: fixed;
+      right: 24px;
+      bottom: 94px;
+      width: min(360px, calc(100vw - 32px));
+      max-height: 62vh;
+      z-index: 9999;
+      border: 1px solid rgba(167,139,250,.45);
+      border-radius: 12px;
+      background: rgba(10,10,25,.96);
+      box-shadow: 0 20px 45px rgba(0,0,0,.45);
+      display: none;
+      overflow: hidden;
+  }
+  .ai-panel-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 10px 12px;
+      border-bottom: 1px solid rgba(255,255,255,.08);
+      color: #e9d5ff;
+      font-weight: 700;
+      font-family: 'Syne', sans-serif;
+      letter-spacing: .3px;
+  }
+  .ai-panel-body {
+      padding: 10px 12px;
+      display: grid;
+      gap: 8px;
+  }
+  .ai-answer-box {
+      background: rgba(0,0,0,.25);
+      border: 1px solid rgba(255,255,255,.08);
+      border-radius: 8px;
+      padding: 10px;
+      color: #e2e8f0;
+      min-height: 64px;
+      line-height: 1.5;
+      font-size: .9rem;
+  }
 </style>
 </head>
 <body>
@@ -57,6 +112,121 @@
     </div>
   </div>
 </section>
+
+{% if role != 'admin' %}
+<section class="section" style="padding-top:20px;">
+  <div class="bento-grid">
+    <div class="bento-cell wide reveal" style="background: rgba(167,139,250,0.08); border-color: rgba(167,139,250,0.45);">
+      <div class="bento-label" style="color:#c4b5fd;">YOUR SUPPORT INFO</div>
+      <div style="font-size:.85rem; color:#cbd5e1; margin-bottom:10px;">Your account is in private mode: only your files and cases are visible to you.</div>
+      <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(220px,1fr)); gap: 10px; margin-top: 8px;">
+        <div style="background: rgba(0,0,0,.25); border:1px solid rgba(255,255,255,.08); border-radius:8px; padding:10px;">
+          <div style="font-size:.78rem; color:var(--muted); text-transform:uppercase;">Your Email</div>
+          <div style="font-family:'Space Mono'; color:#fff; margin-top:4px;">{{ email }}</div>
+        </div>
+        <div style="background: rgba(0,0,0,.25); border:1px solid rgba(255,255,255,.08); border-radius:8px; padding:10px;">
+          <div style="font-size:.78rem; color:var(--muted); text-transform:uppercase;">Assigned Helper</div>
+          <div style="color:#fff; margin-top:4px;">{{ helper_name }}</div>
+          <div style="font-family:'Space Mono'; color:#a78bfa; font-size:.85rem;">{{ helper_email }}</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="section" style="padding-top:10px;">
+  <div class="section-label reveal">USER KNOWLEDGE HUB</div>
+  <h2 class="section-title reveal">Safety & <em>Legal Basics.</em></h2>
+  <div class="bento-grid">
+    <div class="bento-cell wide reveal">
+      <div class="bento-label">BASIC KNOWLEDGE</div>
+      <ul style="margin: 8px 0 0 18px; color:#e2e8f0; line-height:1.7;">
+        <li>Always keep original screenshots/files. Do not edit them.</li>
+        <li>Capture platform URL, username, date/time, and message context.</li>
+        <li>Block and report abusive accounts after preserving evidence.</li>
+        <li>Enable 2FA and change passwords after harassment incidents.</li>
+        <li>If there is direct threat, contact police/emergency support immediately.</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<button id="aiFloatBtn" class="ai-float-btn" type="button" title="Open Sakhi">Sakhi AI</button>
+<div id="aiPanel" class="ai-panel">
+  <div class="ai-panel-header">
+    <span>Sakhi AI</span>
+    <button type="button" class="btn-ghost" style="padding:.2rem .45rem; font-size:.7rem;" onclick="toggleAIPanel(false)">Close</button>
+  </div>
+  <div class="ai-panel-body">
+    <p style="font-size:.82rem; color:var(--muted); margin:0;">Ask Sakhi AI for basic cyber safety and legal-evidence guidance.</p>
+    <div style="display:flex; gap:8px;">
+      <input id="userAiInput" type="text" class="case-input" style="margin:0;" placeholder="Ask Sakhi AI...">
+      <button class="btn-primary" type="button" onclick="askUserAI()">Ask</button>
+    </div>
+    <div style="display:flex; gap:8px; flex-wrap:wrap;">
+      <button class="btn-ghost" type="button" style="padding:.35rem .55rem; font-size:.72rem;" onclick="fillAsk('What is cyberbullying?')">Cyberbullying?</button>
+      <button class="btn-ghost" type="button" style="padding:.35rem .55rem; font-size:.72rem;" onclick="fillAsk('What evidence should I collect?')">Evidence</button>
+      <button class="btn-ghost" type="button" style="padding:.35rem .55rem; font-size:.72rem;" onclick="fillAsk('What to do if threatened?')">Threat</button>
+    </div>
+    <div id="userAiAnswer" class="ai-answer-box">Hi, I am Sakhi AI. Ask me anything basic about safety, evidence, or reporting steps.</div>
+    <div id="userAiSteps" style="font-size:.82rem; color:#cbd5e1; line-height:1.6; display:grid; gap:4px;"></div>
+    <div id="userAiHistory" style="font-size:.78rem; color:#94a3b8;"></div>
+  </div>
+</div>
+{% endif %}
+
+{% if role == 'admin' %}
+<section class="section" style="padding-top:20px;">
+  <div class="section-label reveal">ADMIN OPERATIONS</div>
+  <h2 class="section-title reveal">Admin <em>Control Center.</em></h2>
+  <div class="bento-grid">
+    <div class="bento-cell reveal">
+      <div class="bento-label">PRIORITY ACTIONS</div>
+      <ul style="margin: 8px 0 0 18px; color:#e2e8f0; line-height:1.7;">
+        <li>Review high-severity evidence daily.</li>
+        <li>Validate suspicious hashes via Verify panel.</li>
+        <li>Export audit CSV for backup/compliance checks.</li>
+      </ul>
+    </div>
+    <div class="bento-cell reveal" style="transition-delay:.1s">
+      <div class="bento-label">RESPONSE PLAYBOOK</div>
+      <ul style="margin: 8px 0 0 18px; color:#e2e8f0; line-height:1.7;">
+        <li>Generate C&D letter for repeated harassment cases.</li>
+        <li>Escalate physical threat content to legal authorities.</li>
+        <li>Purge data only on verified GDPR request.</li>
+      </ul>
+    </div>
+    <div class="bento-cell wide reveal" style="transition-delay:.2s">
+      <div class="bento-label">ESCALATION QUEUE</div>
+      <div style="font-size:.82rem;color:var(--muted);margin-bottom:8px;">High/Medium evidence with pending follow-up actions.</div>
+      <table style="width:100%; border-collapse:collapse;">
+        <thead>
+          <tr style="font-size:.75rem; color:#94a3b8; text-transform:uppercase;">
+            <th style="text-align:left; padding:6px 0;">ID</th>
+            <th style="text-align:left; padding:6px 0;">Severity</th>
+            <th style="text-align:left; padding:6px 0;">Score</th>
+            <th style="text-align:left; padding:6px 0;">Pending</th>
+            <th style="text-align:left; padding:6px 0;">Action</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for item in escalation_queue %}
+          <tr style="border-top:1px solid rgba(255,255,255,.06);">
+            <td style="padding:8px 0; font-family:'Space Mono';">{{ item.evidence_id }}</td>
+            <td style="padding:8px 0;">{{ item.severity }}</td>
+            <td style="padding:8px 0;">{{ item.score_pct }}%</td>
+            <td style="padding:8px 0;">{{ item.pending_count }}</td>
+            <td style="padding:8px 0;"><a href="/evidence/{{ item.evidence_id }}" class="btn-ghost" style="padding:.25rem .5rem; font-size:.7rem;">Review</a></td>
+          </tr>
+          {% else %}
+          <tr><td colspan="5" style="padding:10px 0; color:var(--muted);">No pending escalations.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+{% endif %}
 
 <!-- STATS BAR -->
 <div class="stats-bar">
@@ -106,7 +276,9 @@
       <form action="/analyze" method="POST" enctype="multipart/form-data" id="analyzeForm">
         
         <!-- CASE ID INPUT -->
+        {% if role == 'admin' %}
         <input type="text" name="case_id" class="case-input" placeholder="Assign to Case Folder (e.g., Incident-44, JohnDoe) - Optional">
+        {% endif %}
         
         <textarea name="message" id="messageInput" class="cyber-textarea" placeholder="Paste abusive message here for AI toxicity analysis..."></textarea>
         
@@ -336,6 +508,61 @@ function acceptOCR() {
     
     // Close modal
     document.getElementById('ocrModal').style.display = 'none';
+}
+
+async function askUserAI() {
+    const input = document.getElementById('userAiInput');
+    const output = document.getElementById('userAiAnswer');
+    const stepsBox = document.getElementById('userAiSteps');
+    const historyBox = document.getElementById('userAiHistory');
+    if (!input || !output) return;
+
+    const question = input.value.trim();
+    if (!question) {
+        output.textContent = 'Please type a question first.';
+        return;
+    }
+
+    output.textContent = 'Thinking...';
+    if (stepsBox) stepsBox.innerHTML = '';
+    try {
+        const res = await fetch('/api/v1/user_assistant', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ question })
+        });
+        const data = await res.json();
+        output.textContent = data.answer || 'No answer available.';
+        if (stepsBox && Array.isArray(data.action_steps)) {
+            stepsBox.innerHTML = data.action_steps.map((s, i) => `<div>${i+1}. ${s}</div>`).join('');
+        }
+        if (historyBox && Array.isArray(data.history) && data.history.length) {
+            const short = data.history.slice(-3).map((h) => `• ${h.q}`).join('<br>');
+            historyBox.innerHTML = `<strong>Recent:</strong><br>${short}`;
+        }
+    } catch (e) {
+        output.textContent = 'Assistant is unavailable right now. Please try again.';
+    }
+}
+
+function fillAsk(q) {
+    const input = document.getElementById('userAiInput');
+    if (!input) return;
+    input.value = q;
+    askUserAI();
+}
+
+function toggleAIPanel(forceOpen) {
+    const panel = document.getElementById('aiPanel');
+    if (!panel) return;
+    if (forceOpen === true) panel.style.display = 'block';
+    else if (forceOpen === false) panel.style.display = 'none';
+    else panel.style.display = panel.style.display === 'block' ? 'none' : 'block';
+}
+
+const aiFloatBtn = document.getElementById('aiFloatBtn');
+if (aiFloatBtn) {
+    aiFloatBtn.addEventListener('click', () => toggleAIPanel());
 }
 </script>
 </body>
