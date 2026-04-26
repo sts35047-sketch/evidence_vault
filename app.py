@@ -7,10 +7,11 @@ Visit: http://localhost:5000
 from flask import (Flask, render_template, request, redirect,
                    url_for, send_file, flash, jsonify, session, Response, send_from_directory)
 import sqlite3, os, hashlib, uuid, json, threading, smtplib, requests, re, csv
-from io import StringIO
+from io import StringIO, BytesIO
 from datetime import datetime
 from functools import wraps
 from concurrent.futures import ThreadPoolExecutor
+import zipfile
 
 from reportlab.lib.pagesizes import A4
 from reportlab.lib import colors
@@ -666,12 +667,31 @@ def logout():
 def home():
     with get_db() as c:
         escalation_queue = []
+        surge_index = 0
+        surge_label = "Stable"
+        repeat_patterns = []
+        resilience_score = 100
+        resilience_hint = "Great hygiene. Keep documenting safely."
         if session.get("role") == "admin":
             total = c.execute("SELECT COUNT(*) FROM evidence").fetchone()[0]
             high = c.execute("SELECT COUNT(*) FROM evidence WHERE severity='High'").fetchone()[0]
             medium = c.execute("SELECT COUNT(*) FROM evidence WHERE severity='Medium'").fetchone()[0]
             low = c.execute("SELECT COUNT(*) FROM evidence WHERE severity='Low'").fetchone()[0]
             trend = c.execute("SELECT strftime('%Y-%m', created_at) m, COUNT(*) n FROM evidence GROUP BY m ORDER BY m DESC LIMIT 6").fetchall()
+            high_7d = c.execute("SELECT COUNT(*) FROM evidence WHERE severity='High' AND created_at >= datetime('now', '-7 day')").fetchone()[0]
+            high_prev_7d = c.execute("SELECT COUNT(*) FROM evidence WHERE severity='High' AND created_at < datetime('now', '-7 day') AND created_at >= datetime('now', '-14 day')").fetchone()[0]
+            surge_index = int(((high_7d - high_prev_7d) / max(1, high_prev_7d)) * 100)
+            if surge_index >= 40:
+                surge_label = "Escalating"
+            elif surge_index <= -20:
+                surge_label = "Cooling"
+            pattern_rows = c.execute(
+                "SELECT created_by, COUNT(*) n, AVG(score) avg_score FROM evidence WHERE severity IN ('High','Medium') GROUP BY created_by ORDER BY n DESC, avg_score DESC LIMIT 5"
+            ).fetchall()
+            repeat_patterns = [
+                {"owner": r["created_by"], "count": r["n"], "avg_pct": int((r["avg_score"] or 0) * 100)}
+                for r in pattern_rows if r["created_by"]
+            ]
             queue_rows = c.execute("SELECT evidence_id, severity, created_at, category, score, follow_up_json FROM evidence WHERE severity IN ('High','Medium') ORDER BY id DESC LIMIT 20").fetchall()
             for r in queue_rows:
                 tasks = get_follow_up_tasks(r["follow_up_json"])
@@ -693,6 +713,22 @@ def home():
             medium = c.execute("SELECT COUNT(*) FROM evidence WHERE created_by=? AND severity='Medium'", (uname,)).fetchone()[0]
             low = c.execute("SELECT COUNT(*) FROM evidence WHERE created_by=? AND severity='Low'", (uname,)).fetchone()[0]
             trend = c.execute("SELECT strftime('%Y-%m', created_at) m, COUNT(*) n FROM evidence WHERE created_by=? GROUP BY m ORDER BY m DESC LIMIT 6", (uname,)).fetchall()
+            follow_rows = c.execute("SELECT follow_up_json FROM evidence WHERE created_by=?", (uname,)).fetchall()
+            if follow_rows:
+                task_total = len(follow_rows) * len(DEFAULT_FOLLOW_UP)
+                done = 0
+                for r in follow_rows:
+                    t = get_follow_up_tasks(r["follow_up_json"])
+                    done += sum(1 for v in t.values() if v)
+                completion = int((done / max(1, task_total)) * 100)
+            else:
+                completion = 0
+            risk_penalty = high * 18 + medium * 8
+            resilience_score = max(15, min(100, 100 - risk_penalty + int(completion * 0.35)))
+            if resilience_score < 45:
+                resilience_hint = "Urgent: complete follow-up tasks and contact helper."
+            elif resilience_score < 70:
+                resilience_hint = "Moderate risk: keep reporting and preserving evidence."
 
     return render_template(
         "index.html",
@@ -708,6 +744,11 @@ def home():
         helper_name=session.get("helper_name", "Support Team"),
         helper_email=session.get("helper_email", "support@evidencevault.local"),
         escalation_queue=escalation_queue,
+        surge_index=surge_index,
+        surge_label=surge_label,
+        repeat_patterns=repeat_patterns,
+        resilience_score=resilience_score,
+        resilience_hint=resilience_hint,
         ocr_available=OCR_AVAILABLE,
         detoxify_available=DETOXIFY_AVAILABLE,
         encryption_available=ENCRYPTION_AVAILABLE
@@ -937,6 +978,131 @@ def legal(): return render_template("legal.html", username=session["username"], 
 @login_required
 def info():
     return render_template("info.html", username=session["username"], role=session["role"])
+
+@app.route("/timeline")
+@login_required
+def timeline():
+    with get_db() as c:
+        if session.get("role") == "admin":
+            rows = c.execute(
+                "SELECT evidence_id, created_at, severity, category, score, created_by FROM evidence ORDER BY id DESC LIMIT 120"
+            ).fetchall()
+        else:
+            rows = c.execute(
+                "SELECT evidence_id, created_at, severity, category, score, created_by FROM evidence WHERE created_by=? ORDER BY id DESC LIMIT 120",
+                (session.get("username"),),
+            ).fetchall()
+    return render_template("timeline.html", rows=rows, username=session["username"], role=session["role"])
+
+@app.route("/emergency")
+@login_required
+def emergency():
+    with get_db() as c:
+        if session.get("role") == "admin":
+            total = c.execute("SELECT COUNT(*) FROM evidence").fetchone()[0]
+            high = c.execute("SELECT COUNT(*) FROM evidence WHERE severity='High'").fetchone()[0]
+        else:
+            total = c.execute("SELECT COUNT(*) FROM evidence WHERE created_by=?", (session.get("username"),)).fetchone()[0]
+            high = c.execute("SELECT COUNT(*) FROM evidence WHERE created_by=? AND severity='High'", (session.get("username"),)).fetchone()[0]
+    return render_template("emergency.html", total=total, high=high, username=session["username"], role=session["role"], helper_name=session.get("helper_name", "Support Team"), helper_email=session.get("helper_email", "support@evidencevault.local"))
+
+@app.route("/admin-center")
+@login_required
+def admin_center():
+    if session.get("role") != "admin":
+        flash("⚠ Unauthorized: Admin access required.")
+        return redirect(url_for("home"))
+    with get_db() as c:
+        high_rows = c.execute(
+            "SELECT evidence_id, created_at, score, category, created_by FROM evidence WHERE severity='High' ORDER BY id DESC LIMIT 15"
+        ).fetchall()
+        medium_rows = c.execute(
+            "SELECT evidence_id, created_at, score, category, created_by FROM evidence WHERE severity='Medium' ORDER BY id DESC LIMIT 15"
+        ).fetchall()
+    return render_template("admin_center.html", high_rows=high_rows, medium_rows=medium_rows, username=session["username"], role=session["role"])
+
+@app.route("/judge-mode")
+@login_required
+def judge_mode():
+    if session.get("role") != "admin":
+        flash("⚠ Unauthorized: Judge Mode is for admin presentation access.")
+        return redirect(url_for("home"))
+    with get_db() as c:
+        total = c.execute("SELECT COUNT(*) FROM evidence").fetchone()[0]
+        high = c.execute("SELECT COUNT(*) FROM evidence WHERE severity='High'").fetchone()[0]
+        medium = c.execute("SELECT COUNT(*) FROM evidence WHERE severity='Medium'").fetchone()[0]
+        low = c.execute("SELECT COUNT(*) FROM evidence WHERE severity='Low'").fetchone()[0]
+        latest = c.execute(
+            "SELECT evidence_id, created_at, severity, category, score, created_by FROM evidence ORDER BY id DESC LIMIT 8"
+        ).fetchall()
+        critical = c.execute(
+            "SELECT evidence_id, created_at, category, score, created_by FROM evidence WHERE severity='High' ORDER BY id DESC LIMIT 5"
+        ).fetchall()
+    return render_template(
+        "judge_mode.html",
+        total=total,
+        high=high,
+        medium=medium,
+        low=low,
+        latest=latest,
+        critical=critical,
+        username=session["username"],
+        role=session["role"],
+    )
+
+@app.route("/export/judge-pack")
+@login_required
+def export_judge_pack():
+    if session.get("role") != "admin":
+        flash("⚠ Unauthorized: Admin access required.")
+        return redirect(url_for("home"))
+
+    with get_db() as c:
+        rows = c.execute(
+            "SELECT * FROM evidence WHERE severity='High' ORDER BY id DESC LIMIT 5"
+        ).fetchall()
+
+    zip_buffer = BytesIO()
+    now_tag = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+    with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+        # Summary CSV
+        csv_data = StringIO()
+        writer = csv.writer(csv_data)
+        writer.writerow(["Evidence ID", "Owner", "Severity", "Category", "Score %", "Created At", "Hash"])
+        for r in rows:
+            writer.writerow([
+                r["evidence_id"],
+                r["created_by"],
+                r["severity"],
+                r["category"],
+                f"{float(r['score'] or 0) * 100:.1f}",
+                r["created_at"],
+                r["hash"],
+            ])
+        zf.writestr("judge_summary.csv", csv_data.getvalue())
+
+        # Attach generated PDFs for each critical item
+        for r in rows:
+            row = dict(r)
+            row["content"] = decrypt_text(row["content"])
+            pdf_name = f"Evidence_{row['evidence_id']}.pdf"
+            pdf_path = os.path.join(UPLOAD_FOLDER, f"{row['evidence_id']}_judge_pack.pdf")
+            make_pdf(row, pdf_path, redact_pii=False)
+            if os.path.exists(pdf_path):
+                zf.write(pdf_path, arcname=pdf_name)
+                try:
+                    os.remove(pdf_path)
+                except Exception:
+                    pass
+
+    zip_buffer.seek(0)
+    return send_file(
+        zip_buffer,
+        mimetype="application/zip",
+        as_attachment=True,
+        download_name=f"Judge_Pack_{now_tag}.zip",
+    )
 
 @app.route("/export/csv")
 @login_required

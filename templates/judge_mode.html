@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>Judge Mode — EvidenceVault</title>
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet"/>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+<div id="cursor-outer"></div><div id="cursor-inner"></div>
+<div class="blob-layer"><div class="blob blob-1"></div><div class="blob blob-2"></div><div class="blob blob-3"></div></div>
+<nav>
+  <div class="nav-logo">EVIDENCE<span>VAULT</span></div>
+  <div class="nav-links">
+    <a href="/">Dashboard</a><a href="/vault">Vault</a><a href="/timeline">Timeline</a><a href="/admin-center">Admin Center</a><a href="/judge-mode" class="active">Judge Mode</a>
+  </div>
+  <div class="nav-user"><span class="user-chip">{{ username }} · {{ role }}</span><a href="/logout" class="btn-logout">LOGOUT</a></div>
+</nav>
+
+<section class="section" style="padding-top:120px;">
+  <div class="section-label reveal">PRESENTATION VIEW</div>
+  <h2 class="section-title reveal">Judge <em>Mode.</em></h2>
+  <div class="reveal" style="margin-bottom:12px;">
+    <a href="/export/judge-pack" class="btn-primary">EXPORT JUDGE PACK ZIP ⬇</a>
+  </div>
+  <div class="bento-grid">
+    <div class="bento-cell reveal"><div class="bento-label">TOTAL EVIDENCE</div><div style="font-size:2.2rem;font-weight:800;">{{ total }}</div></div>
+    <div class="bento-cell reveal"><div class="bento-label">HIGH RISK</div><div style="font-size:2.2rem;font-weight:800;color:#ef4444;">{{ high }}</div></div>
+    <div class="bento-cell reveal"><div class="bento-label">MEDIUM</div><div style="font-size:2.2rem;font-weight:800;color:#f59e0b;">{{ medium }}</div></div>
+    <div class="bento-cell reveal"><div class="bento-label">LOW</div><div style="font-size:2.2rem;font-weight:800;color:#22c55e;">{{ low }}</div></div>
+  </div>
+
+  <div class="bento-grid" style="margin-top:14px;">
+    <div class="bento-cell wide reveal">
+      <div class="bento-label">LATEST CRITICAL ITEMS</div>
+      <table style="width:100%; border-collapse:collapse; margin-top:8px;">
+        <thead><tr style="font-size:.75rem;color:#94a3b8;text-transform:uppercase;"><th style="text-align:left;padding:6px 0;">ID</th><th style="text-align:left;padding:6px 0;">Owner</th><th style="text-align:left;padding:6px 0;">Category</th><th style="text-align:left;padding:6px 0;">Score</th><th style="text-align:left;padding:6px 0;">Action</th></tr></thead>
+        <tbody>
+        {% for r in critical %}
+          <tr style="border-top:1px solid rgba(255,255,255,.07);"><td style="padding:8px 0; font-family:'Space Mono';">{{ r['evidence_id'] }}</td><td>{{ r['created_by'] }}</td><td>{{ r['category'] }}</td><td>{{ "%.0f"|format((r['score'] or 0)*100) }}%</td><td><a href="/evidence/{{ r['evidence_id'] }}" class="btn-ghost" style="padding:.25rem .55rem;">Open</a></td></tr>
+        {% else %}
+          <tr><td colspan="5" style="padding:8px 0;color:var(--muted);">No high severity evidence yet.</td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    <div class="bento-cell wide reveal" style="transition-delay:.1s">
+      <div class="bento-label">RECENT PROOF ARTIFACTS</div>
+      <table style="width:100%; border-collapse:collapse; margin-top:8px;">
+        <thead><tr style="font-size:.75rem;color:#94a3b8;text-transform:uppercase;"><th style="text-align:left;padding:6px 0;">Time</th><th style="text-align:left;padding:6px 0;">ID</th><th style="text-align:left;padding:6px 0;">Severity</th><th style="text-align:left;padding:6px 0;">Open</th><th style="text-align:left;padding:6px 0;">PDF</th></tr></thead>
+        <tbody>
+        {% for r in latest %}
+          <tr style="border-top:1px solid rgba(255,255,255,.07);">
+            <td style="padding:8px 0;">{{ r['created_at'] }}</td>
+            <td style="padding:8px 0; font-family:'Space Mono';">{{ r['evidence_id'] }}</td>
+            <td style="padding:8px 0;">{% if r['severity']=='High' %}<span class="badge high">High</span>{% elif r['severity']=='Medium' %}<span class="badge medium">Medium</span>{% else %}<span class="badge low">Low</span>{% endif %}</td>
+            <td style="padding:8px 0;"><a href="/evidence/{{ r['evidence_id'] }}" class="btn-ghost" style="padding:.25rem .55rem;">View</a></td>
+            <td style="padding:8px 0;"><a href="/report/{{ r['evidence_id'] }}" class="btn-primary" style="padding:.25rem .55rem;">PDF</a></td>
+          </tr>
+        {% else %}
+          <tr><td colspan="5" style="padding:8px 0;color:var(--muted);">No recent evidence.</td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<footer><div class="footer-logo">EVIDENCE<span>VAULT</span></div><div class="footer-copy">© 2026 EVIDENCEVAULT. ALL RIGHTS RESERVED.</div></footer>
+<script src="{{ url_for('static', filename='script.js') }}"></script>
+</body>
+</html>

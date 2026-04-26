@@ -83,6 +83,10 @@
   <div class="nav-links">
     <a href="/" class="active">Dashboard</a>
     <a href="/vault">Vault</a>
+    <a href="/timeline">Timeline</a>
+    <a href="/emergency">Emergency</a>
+    {% if role == 'admin' %}<a href="/admin-center">Admin Center</a>{% endif %}
+    {% if role == 'admin' %}<a href="/judge-mode">Judge Mode</a>{% endif %}
     <a href="/verify">Verify</a>
     <a href="/legal">Legal Guide</a>
   </div>
@@ -131,6 +135,27 @@
           <div style="font-family:'Space Mono'; color:#a78bfa; font-size:.85rem;">{{ helper_email }}</div>
         </div>
       </div>
+    </div>
+  </div>
+</section>
+
+<section class="section" style="padding-top:8px;">
+  <div class="section-label reveal">PERSONAL DEFENSE INDEX</div>
+  <h2 class="section-title reveal">Your Safety <em>Resilience.</em></h2>
+  <div class="bento-grid">
+    <div class="bento-cell reveal">
+      <div class="bento-label">RESILIENCE SCORE</div>
+      <div style="font-size:2.4rem;font-weight:800;color:{% if resilience_score >= 75 %}#22c55e{% elif resilience_score >= 50 %}#f59e0b{% else %}#ef4444{% endif %};">{{ resilience_score }}/100</div>
+      <p style="font-size:.84rem;color:#cbd5e1;margin-top:6px;">{{ resilience_hint }}</p>
+    </div>
+    <div class="bento-cell wide reveal" style="transition-delay:.1s;">
+      <div class="bento-label">24H ACTION COACH (UNIQUE)</div>
+      <ol style="margin:10px 0 0 18px; color:#e2e8f0; line-height:1.8;">
+        <li>Finish all follow-up checkboxes on your latest evidence.</li>
+        <li>Export at least one PDF report for legal backup.</li>
+        <li>Share critical case IDs with your assigned helper.</li>
+        <li>Turn on 2FA and revoke unknown sessions.</li>
+      </ol>
     </div>
   </div>
 </section>
@@ -224,6 +249,23 @@
           {% endfor %}
         </tbody>
       </table>
+    </div>
+    <div class="bento-cell reveal" style="transition-delay:.25s">
+      <div class="bento-label">THREAT PULSE (UNIQUE)</div>
+      <div style="font-size:2.1rem; font-weight:800; color:{% if surge_index > 0 %}#ef4444{% elif surge_index < 0 %}#22c55e{% else %}#cbd5e1{% endif %};">
+        {% if surge_index > 0 %}+{% endif %}{{ surge_index }}%
+      </div>
+      <p style="font-size:.84rem;color:#cbd5e1;">Weekly high-severity shift: <strong>{{ surge_label }}</strong></p>
+    </div>
+    <div class="bento-cell reveal" style="transition-delay:.3s">
+      <div class="bento-label">PATTERN RADAR</div>
+      <div style="display:grid; gap:6px; margin-top:8px;">
+        {% for p in repeat_patterns %}
+          <div style="font-size:.83rem; color:#e2e8f0;">{{ p.owner }} — {{ p.count }} cases (avg {{ p.avg_pct }}%)</div>
+        {% else %}
+          <div style="font-size:.83rem; color:var(--muted);">No recurring owner patterns yet.</div>
+        {% endfor %}
+      </div>
     </div>
   </div>
 </section>
