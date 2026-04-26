@@ -1,0 +1,9 @@
+Flask==2.1.1
+cryptography==36.0.1
+pytest==7.1.2
+redis==4.1.0
+rq==1.10.0
+celery==5.2.0
+sqlalchemy==1.4.27
+sqlite3==3.36.0
+python-dotenv==0.19.2

@@ -1,0 +1,66 @@
+{
+  "manifest_version": 3,
+  "name": "EvidenceVault - Cyberbullying Detector",
+  "version": "2.0.0",
+  "description": "Real-time detection and capture of cyberbullying and toxic content on social media with instant highlighting and reporting",
+  "permissions": [
+    "contextMenus",
+    "notifications",
+    "storage",
+    "scripting",
+    "tabs",
+    "webRequest"
+  ],
+  "host_permissions": [
+    "http://localhost:5000/*",
+    "http://localhost:8000/*",
+    "https://twitter.com/*",
+    "https://x.com/*",
+    "https://facebook.com/*",
+    "https://www.facebook.com/*",
+    "https://instagram.com/*",
+    "https://www.instagram.com/*",
+    "https://tiktok.com/*",
+    "https://www.tiktok.com/*",
+    "https://reddit.com/*",
+    "https://www.reddit.com/*",
+    "https://youtube.com/*",
+    "https://www.youtube.com/*",
+    "https://discord.com/*",
+    "https://www.discord.com/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://twitter.com/*",
+        "https://x.com/*",
+        "https://facebook.com/*",
+        "https://www.facebook.com/*",
+        "https://instagram.com/*",
+        "https://www.instagram.com/*",
+        "https://tiktok.com/*",
+        "https://www.tiktok.com/*",
+        "https://reddit.com/*",
+        "https://www.reddit.com/*",
+        "https://youtube.com/*",
+        "https://www.youtube.com/*",
+        "https://discord.com/*",
+        "https://www.discord.com/*"
+      ],
+      "js": ["content.js"],
+      "css": ["highlight.css"]
+    }
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "EvidenceVault - Real-time Monitoring Active"
+  },
+  "icons": {
+    "16": "images/icon16.png",
+    "48": "images/icon48.png",
+    "128": "images/icon128.png"
+  }
+}

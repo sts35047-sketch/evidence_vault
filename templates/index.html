@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>EvidenceVault — Dashboard</title>
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet"/>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+<style>
+  .case-input { 
+      width: 100%; 
+      padding: 0.8rem; 
+      background: rgba(0,0,0,0.2); 
+      border: 1px solid rgba(255,255,255,0.1); 
+      border-radius: 4px; 
+      color: white; 
+      margin-bottom: 10px; 
+      font-family: 'DM Sans', sans-serif; 
+  }
+  .case-input::placeholder { color: rgba(255,255,255,0.4); }
+</style>
+</head>
+<body>
+<div id="cursor-outer"></div><div id="cursor-inner"></div>
+<div class="blob-layer"><div class="blob blob-1"></div><div class="blob blob-2"></div><div class="blob blob-3"></div></div>
+
+<nav>
+  <div class="nav-logo">EVIDENCE<span>VAULT</span></div>
+  <div class="nav-links">
+    <a href="/" class="active">Dashboard</a>
+    <a href="/vault">Vault</a>
+    <a href="/verify">Verify</a>
+    <a href="/legal">Legal Guide</a>
+  </div>
+  <div class="nav-user">
+    <span class="user-chip">{{ username }} · {{ role }}</span>
+    <a href="/logout" class="btn-logout">LOGOUT</a>
+  </div>
+</nav>
+
+<!-- HERO -->
+<section class="hero">
+  <div class="scene-3d">
+    <div class="ring ring-1"></div><div class="ring ring-2"></div><div class="ring ring-3"></div>
+    <div class="cube">
+      <div class="cube-face front"></div><div class="cube-face back"></div>
+      <div class="cube-face left"></div><div class="cube-face right"></div>
+      <div class="cube-face top"></div><div class="cube-face bottom"></div>
+    </div>
+  </div>
+  <div class="hero-content">
+    <div class="hero-eyebrow"><span class="eyebrow-dash"></span>LEGAL FORENSICS · TAMPER-PROOF</div>
+    <h1 class="hero-title">SECURE.<br><span class="line2">ANALYZE.</span><span class="line3">PRESERVE.</span></h1>
+    <p class="hero-desc">Automated cyberbullying detection and secure legal evidence documentation. Powered by AI, designed for justice.</p>
+    <div class="hero-actions">
+      <button class="btn-primary" onclick="document.getElementById('analyze-section').scrollIntoView({behavior:'smooth'})">ANALYZE EVIDENCE ↗</button>
+      <a href="/vault"><button class="btn-ghost">VIEW VAULT →</button></a>
+    </div>
+  </div>
+</section>
+
+<!-- STATS BAR -->
+<div class="stats-bar">
+  <div class="stat-item reveal"><div class="stat-num">{{ total }}</div><div class="stat-label-sm">Total Records</div></div>
+  <div class="stat-item red reveal" style="transition-delay:.1s"><div class="stat-num">{{ high }}</div><div class="stat-label-sm">High Severity</div></div>
+  <div class="stat-item orange reveal" style="transition-delay:.2s"><div class="stat-num">{{ medium }}</div><div class="stat-label-sm">Medium Severity</div></div>
+  <div class="stat-item green reveal" style="transition-delay:.3s"><div class="stat-num">{{ low }}</div><div class="stat-label-sm">Low Severity</div></div>
+</div>
+
+<!-- CHARTS -->
+<section class="section">
+  <div class="section-label reveal">ANALYTICS</div>
+  <h2 class="section-title reveal">Incident <em>Trends.</em></h2>
+  <div class="charts-grid">
+    <div class="chart-card reveal">
+      <div class="chart-label">MONTHLY INCIDENTS</div>
+      <canvas id="trendChart" height="180"></canvas>
+    </div>
+    <div class="chart-card reveal" style="transition-delay:.1s">
+      <div class="chart-label">SEVERITY DISTRIBUTION</div>
+      <canvas id="sevChart" height="180"></canvas>
+    </div>
+  </div>
+</section>
+
+<!-- ANALYZE SECTION -->
+<section class="section" id="analyze-section">
+  <div class="section-label reveal">NEW ENTRY</div>
+  <h2 class="section-title reveal">Process <em>evidence.</em></h2>
+
+  <div class="flash-container">
+    {% with messages = get_flashed_messages() %}
+      {% if messages %}{% for msg in messages %}
+      <div class="flash-msg">✓ {{ msg }}</div>
+      {% endfor %}{% endif %}
+    {% endwith %}
+  </div>
+
+  <div class="bento-grid">
+    <!-- Main form -->
+    <div class="bento-cell wide reveal">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+        <div class="bento-label" style="margin-bottom: 0;">ANALYSIS ENGINE</div>
+        <div id="liveScoreBadge" class="badge" style="display: none; font-size: 0.75rem; padding: 0.4rem 0.8rem;">Live Toxicity: <span id="liveScoreValue">0%</span></div>
+      </div>
+      <div style="font-family:var(--display);font-size:1.4rem;font-weight:800;margin-bottom:10px;">Submit Abuse Evidence</div>
+      <form action="/analyze" method="POST" enctype="multipart/form-data" id="analyzeForm">
+        
+        <!-- CASE ID INPUT -->
+        <input type="text" name="case_id" class="case-input" placeholder="Assign to Case Folder (e.g., Incident-44, JohnDoe) - Optional">
+        
+        <textarea name="message" id="messageInput" class="cyber-textarea" placeholder="Paste abusive message here for AI toxicity analysis..."></textarea>
+        
+        <div class="file-upload-wrap">
+          <label class="cyber-file-label" for="imgInput">
+            <span>📎</span>
+            <span id="fileLabel">Upload Screenshot / Image (OCR auto-extracts text)</span>
+          </label>
+          <input type="file" name="image" id="imgInput" class="cyber-file" accept="image/*"
+                 onchange="previewOCR()">
+        </div>
+
+        <!-- OCR Preview Modal -->
+        <div id="ocrModal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); z-index: 9999; align-items: center; justify-content: center;">
+          <div style="background: #0f0f1e; border: 2px solid #7c3aed; border-radius: 8px; padding: 20px; max-width: 600px; width: 90%; max-height: 80vh; overflow-y: auto; box-shadow: 0 0 30px rgba(124, 58, 237, 0.3);">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+              <h3 style="margin: 0; color: #a78bfa;">OCR Preview - Extracted Text</h3>
+              <button type="button" onclick="document.getElementById('ocrModal').style.display='none'" style="background: none; border: none; color: #7c3aed; font-size: 24px; cursor: pointer;">✕</button>
+            </div>
+            <div id="ocrPreviewText" style="background: #1a1a2e; border: 1px solid #7c3aed; border-radius: 4px; padding: 12px; color: #e0e0e0; font-family: 'Space Mono'; font-size: 0.9rem; line-height: 1.4; max-height: 300px; overflow-y: auto; margin-bottom: 15px; white-space: pre-wrap;"></div>
+            <div id="ocrScores" style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 15px; font-size: 0.85rem;">
+              <div style="background: #1a1a2e; padding: 10px; border-radius: 4px; border-left: 3px solid #7c3aed;"><strong>Category:</strong> <span id="ocrCat">N/A</span></div>
+              <div style="background: #1a1a2e; padding: 10px; border-radius: 4px; border-left: 3px solid #7c3aed;"><strong>Severity:</strong> <span id="ocrSev">N/A</span></div>
+              <div style="background: #1a1a2e; padding: 10px; border-radius: 4px; border-left: 3px solid #7c3aed;"><strong>Score:</strong> <span id="ocrScore">N/A</span></div>
+              <div style="background: #1a1a2e; padding: 10px; border-radius: 4px; border-left: 3px solid #7c3aed;"><strong>Keywords:</strong> <span id="ocrKeywords">—</span></div>
+            </div>
+            <div style="display: flex; gap: 10px;">
+              <button type="button" onclick="acceptOCR()" class="btn-primary" style="flex: 1;">✓ ACCEPT & CONTINUE</button>
+              <button type="button" onclick="document.getElementById('ocrModal').style.display='none'" class="btn-ghost" style="flex: 1;">EDIT TEXT</button>
+            </div>
+          </div>
+        </div>
+        
+        <button type="submit" class="btn-primary" style="width:100%;justify-content:center;" id="analyzeBtn">
+          <span id="btnTxt">ANALYZE &amp; SECURE ↗</span>
+          <span id="btnLoad" style="display:none">⏳ PROCESSING...</span>
+        </button>
+      </form>
+    </div>
+
+    <!-- Status cards -->
+    <div class="bento-cell dark reveal" style="transition-delay:.1s">
+      <div class="bento-label">AI MODEL</div>
+      <div style="font-family:var(--display);font-size:2rem;font-weight:800;color:{% if detoxify_available %}var(--green){% else %}#f59e0b{% endif %};margin:10px 0;">
+        {% if detoxify_available %}DETOXIFY{% else %}KEYWORD{% endif %}
+      </div>
+      <p style="font-size:.82rem;color:var(--muted)">
+        {% if detoxify_available %}Detoxify model active. Detecting 6 toxicity categories.
+        {% else %}Keyword engine active. Install <code>detoxify</code> for ML scoring.{% endif %}
+      </p>
+    </div>
+    <div class="bento-cell dark reveal" style="transition-delay:.15s">
+      <div class="bento-label">HASH INTEGRITY</div>
+      <div style="font-family:var(--display);font-size:2rem;font-weight:800;margin:10px 0;">SHA-256</div>
+      <p style="font-size:.82rem;color:var(--muted)">Every record cryptographically hashed and chain-anchored.</p>
+    </div>
+    <div class="bento-cell dark reveal" style="transition-delay:.2s">
+      <div class="bento-label">OCR ENGINE</div>
+      <div style="font-family:var(--display);font-size:2rem;font-weight:800;color:{% if ocr_available %}#a78bfa{% else %}var(--muted){% endif %};margin:10px 0;">
+        {% if ocr_available %}ACTIVE{% else %}OFFLINE{% endif %}
+      </div>
+      <p style="font-size:.82rem;color:var(--muted)">
+        {% if ocr_available %}Tesseract OCR extracts text from uploaded images.
+        {% else %}Install <code>pytesseract</code> + Tesseract to enable OCR.{% endif %}
+      </p>
+    </div>
+    <div class="bento-cell dark reveal" style="transition-delay:.25s">
+      <div class="bento-label">BLOCKCHAIN</div>
+      <div style="font-family:var(--display);font-size:2rem;font-weight:800;color:#f59e0b;margin:10px 0;">DEMO</div>
+      <p style="font-size:.82rem;color:var(--muted)">SHA-256 hashes anchored to a local chain ledger for tamper-proof timestamps.</p>
+    </div>
+    <div class="bento-cell dark reveal" style="transition-delay:.3s">
+      <div class="bento-label">REST API</div>
+      <div style="font-family:var(--display);font-size:2rem;font-weight:800;color:var(--green);margin:10px 0;">LIVE</div>
+      <p style="font-size:.82rem;color:var(--muted)">POST <code>/api/v1/analyze</code> for Chrome Extension integration.</p>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="footer-logo">EVIDENCE<span>VAULT</span></div>
+  <div class="footer-copy">© 2026 EVIDENCEVAULT. ALL RIGHTS RESERVED.</div>
+</footer>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script src="{{ url_for('static', filename='script.js') }}"></script>
+<script>
+const trendLabels = {{ trend_labels|safe }};
+const trendData   = {{ trend_data|safe }};
+const chartDefaults = { responsive:true, plugins:{ legend:{ labels:{ color:'#888', font:{ family:'Space Mono', size:11 } } } } };
+
+new Chart(document.getElementById('trendChart'),{
+  type:'line',
+  data:{
+    labels: trendLabels.length ? trendLabels : ['No data'],
+    datasets:[{ label:'Incidents', data: trendData.length ? trendData : [0],
+      borderColor:'#7c3aed', backgroundColor:'rgba(124,58,237,.12)',
+      tension:.4, fill:true, pointBackgroundColor:'#7c3aed', pointRadius:5 }]
+  },
+  options:{ ...chartDefaults, scales:{
+    x:{ ticks:{color:'#666'}, grid:{color:'rgba(255,255,255,.04)'} },
+    y:{ ticks:{color:'#666'}, grid:{color:'rgba(255,255,255,.04)'}, beginAtZero:true }
+  }}
+});
+
+new Chart(document.getElementById('sevChart'),{
+  type:'doughnut',
+  data:{
+    labels:['High','Medium','Low'],
+    datasets:[{ data:[{{ high }},{{ medium }},{{ low }}],
+      backgroundColor:['#dc2626','#ea580c','#16a34a'], borderWidth:0, hoverOffset:8 }]
+  },
+  options:{ ...chartDefaults, cutout:'70%' }
+});
+
+// FORM LOADING STATE: Safely disable button to prevent freezing
+document.getElementById('analyzeForm').addEventListener('submit', function() {
+  document.getElementById('btnTxt').style.display = 'none';
+  document.getElementById('btnLoad').style.display = 'inline-flex';
+  
+  setTimeout(() => {
+      document.getElementById('analyzeBtn').disabled = true;
+  }, 50);
+});
+
+// REAL-TIME LIVE SCORING
+const messageInput = document.getElementById('messageInput');
+const liveScoreBadge = document.getElementById('liveScoreBadge');
+const liveScoreValue = document.getElementById('liveScoreValue');
+let typingTimer;
+
+messageInput.addEventListener('input', () => {
+    clearTimeout(typingTimer);
+    const text = messageInput.value.trim();
+    
+    if (text.length < 5) { 
+        liveScoreBadge.style.display = 'none'; 
+        return; 
+    }
+    
+    liveScoreBadge.style.display = 'inline-flex';
+    liveScoreBadge.className = 'badge'; 
+    liveScoreValue.textContent = '...';
+    
+    typingTimer = setTimeout(async () => {
+        try {
+            const res = await fetch('/api/v1/analyze', {
+                method: 'POST', 
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ api_key: 'evault-demo-key-2026', text: text, preview: true })
+            });
+            const data = await res.json();
+            if (data.score !== undefined) {
+                liveScoreValue.textContent = `${(data.score * 100).toFixed(1)}%`;
+                if (data.severity === 'High') liveScoreBadge.classList.add('high');
+                else if (data.severity === 'Medium') liveScoreBadge.classList.add('medium');
+                else liveScoreBadge.classList.add('low');
+            }
+        } catch(e) { 
+            console.error("Live scoring error", e); 
+        }
+    }, 600);
+});
+
+// OCR PREVIEW FUNCTIONALITY
+async function previewOCR() {
+    const fileInput = document.getElementById('imgInput');
+    const fileLabel = document.getElementById('fileLabel');
+    
+    if (!fileInput.files || !fileInput.files[0]) {
+        fileLabel.textContent = 'Upload Screenshot / Image (OCR auto-extracts text)';
+        return;
+    }
+    
+    const file = fileInput.files[0];
+    fileLabel.textContent = file.name;
+    
+    // Show loading state
+    const modal = document.getElementById('ocrModal');
+    const previewText = document.getElementById('ocrPreviewText');
+    previewText.textContent = '⏳ Extracting text from image...';
+    modal.style.display = 'flex';
+    
+    try {
+        const formData = new FormData();
+        formData.append('image', file);
+        
+        const res = await fetch('/api/v1/ocr_preview', {
+            method: 'POST',
+            body: formData
+        });
+        
+        const data = await res.json();
+        
+        console.log('[OCR Preview] Response:', data);
+        
+        if (data.error) {
+            previewText.textContent = `⚠ ${data.error || 'Unable to extract text'}`;
+        } else if (!data.text) {
+            previewText.textContent = '(No text detected in image)';
+        } else {
+            previewText.textContent = data.text;
+        }
+        
+        // Display scores (handle NaN)
+        const score = data.score !== undefined ? data.score : 0;
+        document.getElementById('ocrCat').textContent = data.category || 'N/A';
+        document.getElementById('ocrSev').textContent = data.severity || 'N/A';
+        document.getElementById('ocrScore').textContent = isNaN(score) ? '0%' : `${(score * 100).toFixed(1)}%`;
+        document.getElementById('ocrKeywords').textContent = (data.highlights && data.highlights.length) ? data.highlights.join(', ') : '—';
+        
+    } catch (err) {
+        previewText.textContent = `⚠ Failed to preview: ${err.message}`;
+        console.error('OCR preview error:', err);
+    }
+}
+
+function acceptOCR() {
+    const extractedText = document.getElementById('ocrPreviewText').textContent;
+    const messageInput = document.getElementById('messageInput');
+    
+    messageInput.value = extractedText;
+    messageInput.focus();
+    
+    // Trigger live scoring
+    messageInput.dispatchEvent(new Event('input'));
+    
+    // Close modal
+    document.getElementById('ocrModal').style.display = 'none';
+}
+</script>
+</body>
+</html>

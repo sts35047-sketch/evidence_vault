@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>Login — EvidenceVault</title>
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet"/>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+<div id="cursor-outer"></div><div id="cursor-inner"></div>
+<div class="blob-layer"><div class="blob blob-1"></div><div class="blob blob-2"></div><div class="blob blob-3"></div></div>
+
+<div class="login-wrap">
+  <div class="login-card">
+    <div class="nav-logo" style="font-size:1.4rem;margin-bottom:.4rem;">EVIDENCE<span>VAULT</span></div>
+    <p style="color:var(--muted);font-size:.85rem;margin-bottom:1.8rem;">Secure forensics platform. Authorised access only.</p>
+
+    {% with messages = get_flashed_messages() %}
+      {% if messages %}{% for msg in messages %}
+      <div class="flash-msg error" style="margin-bottom:1rem;">{{ msg }}</div>
+      {% endfor %}{% endif %}
+    {% endwith %}
+
+    <form method="POST" action="/login" style="display:flex;flex-direction:column;gap:1rem;">
+      <div class="login-field">
+        <label>USERNAME</label>
+        <input type="text" name="username" placeholder="admin" required autofocus>
+      </div>
+      <div class="login-field">
+        <label>PASSWORD</label>
+        <input type="password" name="password" placeholder="••••••••" required>
+      </div>
+      <button type="submit" class="btn-primary" style="width:100%;justify-content:center;margin-top:.5rem;">ENTER VAULT ↗</button>
+    </form>
+    <p style="color:var(--muted);font-size:.72rem;margin-top:1.5rem;text-align:center;font-family:var(--mono);">
+      DEMO — admin / admin123 &nbsp;·&nbsp; user / user123
+    </p>
+  </div>
+</div>
+<script src="{{ url_for('static', filename='script.js') }}"></script>
+</body>
+</html>

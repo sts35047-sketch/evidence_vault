@@ -1,0 +1,163 @@
+/* EvidenceVault - Toxic Content Highlighting Styles */
+
+.evault-toxic-highlight {
+  position: relative;
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: 3px;
+  transition: all 0.3s ease;
+}
+
+/* Toxicity severity levels */
+.evault-toxic-highlight.toxicity-critical {
+  background-color: #ff4444 !important;
+  color: white !important;
+  font-weight: bold;
+  box-shadow: 0 0 8px rgba(255, 68, 68, 0.5);
+}
+
+.evault-toxic-highlight.toxicity-high {
+  background-color: #ff9800 !important;
+  color: white !important;
+  font-weight: 600;
+  box-shadow: 0 0 6px rgba(255, 152, 0, 0.4);
+}
+
+.evault-toxic-highlight.toxicity-medium {
+  background-color: #ffc107 !important;
+  color: #333 !important;
+  font-weight: 500;
+}
+
+.evault-toxic-highlight.toxicity-low {
+  background-color: #ffeb3b !important;
+  color: #333 !important;
+}
+
+/* Hover effects */
+.evault-toxic-highlight:hover {
+  transform: scale(1.05);
+  z-index: 10000;
+}
+
+.evault-toxic-highlight:hover::after {
+  content: attr(title);
+  position: absolute;
+  bottom: 125%;
+  left: 50%;
+  transform: translateX(-50%);
+  background-color: rgba(0, 0, 0, 0.9);
+  color: white;
+  padding: 8px 12px;
+  border-radius: 4px;
+  font-size: 12px;
+  white-space: nowrap;
+  z-index: 10001;
+  pointer-events: none;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
+/* Badge indicator */
+.evault-monitoring-badge {
+  position: fixed;
+  top: 10px;
+  right: 10px;
+  background-color: #ff4444;
+  color: white;
+  padding: 8px 12px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: bold;
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  animation: pulse 2s infinite;
+}
+
+.evault-monitoring-badge::before {
+  content: '';
+  width: 8px;
+  height: 8px;
+  background-color: white;
+  border-radius: 50%;
+  animation: blink 1s infinite;
+}
+
+@keyframes blink {
+  0%, 49%, 100% {
+    opacity: 1;
+  }
+  50%, 99% {
+    opacity: 0;
+  }
+}
+
+@keyframes pulse {
+  0%, 100% {
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  }
+  50% {
+    box-shadow: 0 2px 15px rgba(255, 68, 68, 0.5);
+  }
+}
+
+/* Capture button */
+.evault-capture-button {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  width: 60px;
+  height: 60px;
+  background-color: #ff4444;
+  border: none;
+  border-radius: 50%;
+  color: white;
+  font-size: 24px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
+  z-index: 9998;
+  transition: all 0.3s ease;
+}
+
+.evault-capture-button:hover {
+  background-color: #cc0000;
+  transform: scale(1.1);
+  box-shadow: 0 4px 15px rgba(255, 68, 68, 0.5);
+}
+
+/* Stats panel */
+.evault-stats-panel {
+  position: fixed;
+  top: 50px;
+  right: 10px;
+  background-color: rgba(0, 0, 0, 0.9);
+  color: white;
+  padding: 15px;
+  border-radius: 8px;
+  font-size: 13px;
+  min-width: 200px;
+  z-index: 9997;
+  font-family: 'Courier New', monospace;
+}
+
+.evault-stats-panel p {
+  margin: 5px 0;
+}
+
+.evault-stats-label {
+  color: #ffeb3b;
+  font-weight: bold;
+}
+
+.evault-stats-value {
+  color: #4CAF50;
+}
+
+.evault-stats-critical {
+  color: #ff4444;
+}
